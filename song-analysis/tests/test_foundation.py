@@ -32,23 +32,37 @@ def main():
                alternative=dict(grouping=[6, 5], downbeat_pulse=0))
 
     r, _ = run(d, None)
-    check("INCONCLUSIVE asks the user", r.returncode and "count" in r.stderr, r.stderr)
+    check("INCONCLUSIVE asks the user: exit 2", r.returncode == 2 and "count" in r.stderr
+          and "NEEDS A DECISION" in r.stderr, (r.returncode, r.stderr))
     r, _ = run(d, dict(cycle=8, grouping=[4, 4], downbeat_pulse=1))
-    check("phrase cycle 8 asks", r.returncode and "--cycle 4" in r.stderr, r.stderr)
+    check("phrase cycle 8 asks", r.returncode == 2 and "--cycle 4" in r.stderr, r.stderr)
     r, F = run(d, dict(cycle=8, grouping=[4, 4], downbeat_pulse=5), "--cycle", 4)
     check("--cycle 4 -> 4/4 as 2+2, downbeat folded", F and F["grouping"] == [2, 2]
           and F["downbeat_pulse"] == 1 and F["time_signature"] == "4/4", F and F["grouping"])
     r, _ = run(d, odd, "--pulse-unit", 8)
-    check("ambiguous beat 1 asks", r.returncode and "--use-alternative" in r.stderr, r.stderr)
+    check("ambiguous beat 1 asks", r.returncode == 2 and "--use-alternative" in r.stderr, r.stderr)
     r, _ = run(d, odd, "--use-alternative")
-    check("odd cycle without pulse unit asks", r.returncode and "eighth" in r.stderr, r.stderr)
+    check("odd cycle without pulse unit asks", r.returncode == 2 and "eighth" in r.stderr, r.stderr)
     r, F = run(d, odd, "--use-alternative", "--pulse-unit", 8)
     check("11/8 as 6+5 from the alternative", F and F["grouping"] == [6, 5]
           and F["downbeat_times"][0] == 0.0 and F["time_signature"] == "11/8", F and F["grouping"])
     check("Live tempo in quarters", F and abs(F["live_tempo"] - F["bar_bpm"][0] / 2) < 1, F and F["live_tempo"])
     check("drift detected", F and F["tempo_drift_pct"] > 0.3, F and F["tempo_drift_pct"])
     r, _ = run(d, odd, "--grouping", "4,4", "--pulse-unit", 8)
-    check("grouping must sum to the cycle", r.returncode and "sums to" in r.stderr, r.stderr)
+    check("grouping must sum to the cycle: an error, exit 1", r.returncode == 1
+          and "sums to" in r.stderr, r.stderr)
+    r, F = run(d, dict(cycle=8, grouping=[4, 4], downbeat_pulse=5), "--cycle", 4)
+    check("--cycle 4 without --decided-by: Claude's call, recorded and said",
+          F and F["provenance"]["cycle"] == "agent" and F["decided_by"] == {"who": "agent",
+          "what": ["cycle"]} and "Claude's call" in r.stdout, (F and F.get("decided_by"), r.stdout))
+    r, F = run(d, odd, "--use-alternative", "--pulse-unit", 8, "--decided-by", "player")
+    check("--decided-by player: the player's call, nothing said",
+          F and F["provenance"]["downbeat"] == "player"
+          and F["provenance"]["grouping"] == "player chose the alternative"
+          and F["decided_by"]["who"] == "player" and "Claude's call" not in r.stdout,
+          (F and F["provenance"], r.stdout))
+    r, F = run(d, dict(cycle=4, grouping=[2, 2], downbeat_pulse=1))
+    check("all measured: no decided_by", F and "decided_by" not in F, F and F.get("decided_by"))
     sys.exit(1 if fails else 0)
 
 

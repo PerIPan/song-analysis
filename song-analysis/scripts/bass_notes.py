@@ -10,6 +10,12 @@ mode steps read.
 Usage (analysis venv: librosa, numpy, pretty_midi):
     bass_notes.py stems/htdemucs_ft/<song>/bass.wav --foundation analysis/foundation.json \
         [--bass-entry-bar N] [--fmin 40] [--fmax 220] [--outdir analysis]
+
+bass_notes.json records the entry bar used and the one the bass suggests
+(suggested_entry_bar); chord_proposal.py reads them, so the bar isn't copied by hand.
+bass_per_cell.json cells carry their start t0 (and the file its grouping): a chart made
+after beat 1 moved is refused instead of drawn from the wrong cells. bass.mid is timed in
+seconds at pretty_midi's 120 BPM - not on the song's bars in a DAW.
 """
 import argparse, bisect, json
 from pathlib import Path
@@ -117,8 +123,6 @@ def main():
                                    end=n["end"]) for n in notes]
     pm.instruments.append(inst)
     pm.write(str(out / "bass.mid"))
-    json.dump(dict(fmin=a.fmin, fmax=a.fmax, bass_entry_bar=a.bass_entry_bar, notes=notes),
-              open(out / "bass_notes.json", "w"), indent=1)
 
     starts = [n["start"] for n in notes]
     per_cell, total = [], np.zeros(12)
@@ -129,9 +133,15 @@ def main():
             if ov > 0:
                 pcs[n["pitch"] % 12] += ov
         total += pcs
-        per_cell.append(dict(bar=bar, cell=cell, pc_seconds={PCN[i]: round(float(v), 3)
-                                                            for i, v in enumerate(pcs) if v > 0}))
-    json.dump(dict(cells=per_cell), open(out / "bass_per_cell.json", "w"), indent=1)
+        per_cell.append(dict(bar=bar, cell=cell, t0=round(float(t0), 3),
+                             pc_seconds={PCN[i]: round(float(v), 3)
+                                         for i, v in enumerate(pcs) if v > 0}))
+    eb = entry_bar(per_cell)
+    json.dump(dict(fmin=a.fmin, fmax=a.fmax, bass_entry_bar=a.bass_entry_bar,
+                   suggested_entry_bar=max(eb, a.bass_entry_bar), notes=notes),
+              open(out / "bass_notes.json", "w"), indent=1)
+    json.dump(dict(grouping=grouping, cells=per_cell), open(out / "bass_per_cell.json", "w"),
+              indent=1)
     top = np.argsort(total)[::-1][:3]
     share = total / max(total.sum(), 1e-9)
     print(f"{len(notes)} bass notes ({len(notes) / max(notes[-1]['end'] - notes[0]['start'], 1):.2f}/s)"
@@ -145,12 +155,10 @@ def main():
               f"beat 1 is probably off. Unless the harmony is deliberately pushed, re-run "
               f"foundation.py meter --downbeat-pulse {dp} (plus your --cycle/--grouping), "
               f"then this script, before anything else keyed by bar.")
-    if a.bass_entry_bar == 1:
-        eb = entry_bar(per_cell)
-        if eb > 1:
-            print(f"BASS ENTRY: bar {eb} (first of 3 bars in a row with real bass). Earlier "
-                  f"notes are probably stem bleed: re-run with --bass-entry-bar {eb}, and pass the "
-                  f"same to chord_proposal.py.")
+    if a.bass_entry_bar == 1 and eb > 1:
+        print(f"BASS ENTRY: bar {eb} (first of 3 bars in a row with real bass). Earlier "
+              f"notes are probably stem bleed: re-run with --bass-entry-bar {eb} "
+              f"(chord_proposal.py then reads it from bass_notes.json).")
 
 
 if __name__ == "__main__":

@@ -6,14 +6,19 @@
 
     foundation.py meter --foundation analysis/foundation.json --meter analysis/meter.json
         [--cycle N] [--grouping 6,5] [--downbeat-pulse K] [--use-alternative]
-        [--pulse-unit 4|8]
+        [--pulse-unit 4|8] [--decided-by agent|player]
         Adds the meter from detect_meter.py --json: beats_per_bar, pulse_unit,
         grouping, downbeat_times, num_bars, bar_bpm, tempo_drift_pct, live_tempo.
 
 The meter step refuses to guess. It stops with the question to ask the user when
 the sweep was INCONCLUSIVE, found a phrase-length cycle (8/16/24) or a bare duple
 (2), could not tell which of two accents is beat 1, or found an odd cycle without
-a stated pulse unit (11/8 and 11/4 differ by 2x in Live's tempo).
+a stated pulse unit (11/8 and 11/4 differ by 2x in Live's tempo). A question exits 2
+with "NEEDS A DECISION: ..." on stderr; 1 is an error.
+
+Who chose what the flags set is recorded: --decided-by player when the player counted
+or confirmed it, agent (the default) when Claude chose - the provenance then says so,
+and chart_questions.py asks the player to confirm the meter and beat 1 first.
 
 Run with the analysis venv (madmom + numpy; the meter step needs only numpy).
 """
@@ -23,8 +28,9 @@ CONVENTION = {2: [2], 3: [3], 4: [2, 2], 6: [3, 3], 8: [4, 4], 9: [3, 3, 3], 12:
 
 
 def ask(msg):
-    """Stop with the question the agent should put to the user."""
-    sys.exit(f"NEEDS A DECISION: {msg}")
+    """Stop with the question the agent should put to the user: exit 2 (1 is an error)."""
+    print(f"NEEDS A DECISION: {msg}", file=sys.stderr)
+    sys.exit(2)
 
 
 def repair_grid(beats):
@@ -153,15 +159,21 @@ def cmd_meter(a):
     outliers = [i + 1 for i, v in enumerate(bar_bpm) if abs(v / med - 1) > 0.05]
     conf = (f"measured (sweep, {cons.get('confidence', '?')} {cons.get('margin', '?')}x)"
             if cons else None)
+    who = a.decided_by                     # who chose what a flag set: agent or player
     prov = dict(F.get("provenance", {}))
     prov.update(
-        cycle="user" if a.cycle and a.cycle != found else conf,
-        grouping=("user" if a.grouping else "user chose the alternative" if a.use_alternative
+        cycle=who if a.cycle and a.cycle != found else conf,
+        grouping=(who if a.grouping else f"{who} chose the alternative" if a.use_alternative
                   else f"measured ({cons.get('grouping_source', 'accents')})" if cons and cycle == found
                   else "convention"),
-        downbeat=("user" if a.downbeat_pulse is not None or a.use_alternative
-                  else f"measured ({cons.get('anchor_band', 'kick')} band)" if cons else "user"),
-        pulse_unit="user" if a.pulse_unit else "default (quarter)")
+        downbeat=(who if a.downbeat_pulse is not None or a.use_alternative
+                  else f"measured ({cons.get('anchor_band', 'kick')} band)" if cons else who),
+        pulse_unit=who if a.pulse_unit else "default (quarter)")
+    chosen = [k for k in ("cycle", "grouping", "downbeat", "pulse_unit")
+              if prov[k].startswith(who)]
+    F.pop("decided_by", None)
+    if chosen:
+        F["decided_by"] = dict(who=who, what=chosen)
     F.update(provenance=prov, beats_per_bar=cycle, pulse_unit=unit, time_signature=f"{cycle}/{unit}",
              grouping=grouping, downbeat_pulse=dp, pickup_pulses=dp,
              downbeat_times=downbeats, num_bars=len(downbeats) - 1, bar_bpm=bar_bpm,
@@ -179,6 +191,10 @@ def cmd_meter(a):
     if outliers:
         print(f"  bars more than 5% off the median tempo: {outliers[:12]}"
               f"{' ...' if len(outliers) > 12 else ''} (ritardando, fermata or a tracking slip)")
+    if chosen and who == "agent":
+        print(f"  {', '.join(chosen)}: Claude's call, not the player's - say so, and ask the "
+              f"player to count along before the chart goes to the band "
+              f"(re-run with --decided-by player once they confirm)")
 
 
 def main():
@@ -199,6 +215,8 @@ def main():
     m.add_argument("--use-alternative", action="store_true",
                    help="take the sweep's alternative beat 1 / grouping")
     m.add_argument("--pulse-unit", type=int, choices=(4, 8))
+    m.add_argument("--decided-by", choices=("agent", "player"), default="agent",
+                   help="who chose what the flags set (default agent: Claude's call)")
     a = ap.parse_args()
     cmd_pulse(a) if a.cmd == "pulse" else cmd_meter(a)
 

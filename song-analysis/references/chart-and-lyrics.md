@@ -68,49 +68,49 @@ last heard word.
 ### Rule 1 (the big one): every word where it is sung — the player's ears decide
 
 **Default (`placement: 'sung'`): each word sits in the cell where it is sung**, from
-Whisper's word times — a player checking the Body Heat chart on bass (2026-10-01) asked
-for exactly that, cell by cell: "you have the milliseconds, right?". A line's opening
-words may start before its anchor (back to the previous line's last cell or the section
-start): "And this" sung on beat 2.75 of the Cmaj7 bar sits on its second half, "double"
-on the next bar's Em. The anchor only orders the lines.
+Whisper's word times — a player checking a chart on bass asked for exactly that, cell by
+cell: "you have the milliseconds, right?". A line's opening words may start before its
+anchor (back to the previous line's last cell or the section start): "And then" sung on
+beat 2.75 of the Cmaj7 bar sits on its second half, "after" on the next bar's Em. The
+anchor only orders the lines.
 
 **The push: a heard word sung within a dotted eighth (¾ beat, `ANTICIPATE`) before the
 next half-bar and held across it sits in the next cell.** Held = the line's next word
 starts after the boundary, or none follows. Whisper times a word's first consonant and
 singers push into the beat, so "…once more" on beat 4.4 is heard on the next bar's chord,
-and "night" on beat 2.35 on the second half. A long word reaches its stress later, so its window grows half a beat per
-syllable past the second ("fluorescent", started 1.2 beats early, is heard on the next
-bar; Whisper's shorter stand-in "flowing" hid its length). **Stress and length.** A word of two or more syllables stressed on its first one ("Juniper",
-"other", "secrets") is pushed only within 0.45 beat (`STRESS_FIRST`) — its stressed
-syllable is sung where it starts; one stressed later ("pretending", "fluorescent": an
+and "day" on beat 2.35 on the second half. A long word reaches its stress later, so its window grows half a beat per
+syllable past the second ("electrical", started 1.2 beats early, is heard on the next
+bar; Whisper's shorter stand-in "lectric" hid its length). **Stress and length.** A word of two or more syllables stressed on its first one ("Saturday",
+"other", "window") is pushed only within 0.45 beat (`STRESS_FIRST`) — its stressed
+syllable is sung where it starts; one stressed later ("pretending", "electrical": an
 unstressed prefix or a stress-taking suffix) keeps the longer window. A one-syllable word
-held long inside a line is heard where it settles: "dead", sung on beat 3.5 and held five
+held long inside a line is heard where it settles: "gone", sung on beat 3.5 and held five
 beats, belongs to the next bar (window 0.35 × its length, at most 1.75 beats). A pinned
 (`'fixed'`) lyric claims its own heard words, so the next line doesn't take them.
 
 The push goes one half-bar boundary at a time, and only while the word is **held** across
 it (the line's next word starts 0.15 beat or more past the boundary; `HOLD`). A line's
-first word sung within 1¼ beats of the next half-bar joins it ("I'm | coming back",
-"Saying | we'll be"), and if still held carries on to the next bar ("My" on beat 2.9,
+first word sung within 1¼ beats of the next half-bar joins it ("I'm | going home",
+"Telling | you so"), and if still held carries on to the next bar ("My" on beat 2.9,
 "other" in the next bar: "My other" opens that bar). A pickup into a word on the boundary
-stays ("then I'll | pick", "Slow | jazz"); "And this…" — "this" follows in the same
+stays ("then I'll | turn", "Old | keys"); "And then…" — "then" follows in the same
 half-bar — opens the second half. A player's own placement is a
 `'fixed'` lyric (split the line, fix the word). A quick pickup into a word that is itself
-pushed stays ("so I | stepped outside"); a guessed (unheard) word never pushes. Scored
+pushed stays ("so I | walked outside"); a guessed (unheard) word never pushes. Scored
 against the player's 15 corrections: 14/15 (the miss sits in a stop bar). Whisper mishears
-("snow jesus baby" for "slow jazz is playing", "slipped" for "stepped"): words left
+("cold seas are staying" for "old keys are playing", "talked" for "walked"): words left
 unmatched are paired in order with Whisper's unmatched words in the same gap, by letter
 similarity plus the onset letter (heard best), and at a line's open ends only within a
 bar — so a misheard bridge still gets its real times. Lyric pages can
-also drop sung words ("Coming back…" sung "I'm coming back…"): `align_lyrics.py` prints
+also drop sung words ("Going home…" sung "I'm going home…"): `align_lyrics.py` prints
 `SUNG, NOT IN THE TEXT` for Whisper words just before a line that no lyric word took, and
 for a held "oh" (a vocable) right after one —
 check by ear and add them to lyrics.txt.
 
 **Older alternative (`placement: 'anchor'`)**: each phrase lives in the cell of the chord
 it resolves INTO and pickup syllables are absorbed — a band reads cell-to-chord. A player
-asked for it once (2026-05); the Body Heat player wanted the sung position. Ask which the
-band reads; default to sung.
+asked for it once (2026-05); a later one wanted the sung position. Ask which the band
+reads; default to sung.
 
 ```
 Sung:    [A♭ bar...] "Pickup words here,"|[E♭ bar] "and the phrase"  [A♭ bar] "ends"
@@ -125,8 +125,8 @@ their bars (a player asked not to repeat the section names in print —
 
 **Stops.** Where the band drops out under the voice (a stop-time break), the chord stays
 (it shows where the loop is) but is greyed, half-bar by half-bar — the band often plays
-the first half and stops for the second ("Gotta | feel your body heat": a player first
-asked for the whole bar, then heard the first half played and asked for it back). A bar
+the first half and stops for the second (a player first asked for the whole bar greyed,
+then heard the first half played and asked for it back). A bar
 with a stop gets no "?". `stem_activity.py` measures each cell as the median of 50 ms
 frames (`band_level.json`, the stems without vocals vs the median cell), so a hit or a
 ringing chord doesn't count as playing; under 0.15 is a stop. On the first song the stops
@@ -233,6 +233,11 @@ evidence through:
   `(bar, cell)` pairs (`[[9, 1], [12, 2]]` works too; their "?" and dashed underline go)
   and say who checked in the provenance line — the chart then shows what a musician
   checked, not just what software guessed.
+- **Every fix is also a test.** Record each one in `corrections` —
+  `(bar, cell, 'chord', 'G', 'player', '2026-10-12')` or `(bar, cell, 'word', 'other', …)`
+  (the cell's lyric starts with it). Every render checks them (`player corrections: 31/31
+  hold`, a warning naming each one that no longer does); `chart_html.py --check` over all
+  charted songs exits 1 when one breaks — run it before committing any renderer change.
 
 ## HTML output — `scripts/chart_html.py`
 
@@ -243,6 +248,7 @@ everything measured from `analysis/`:
 ```bash
 python3 scripts/chart_html.py gen_v1.py         # → <artist> - <title> - Chords.html beside it
 python3 scripts/chart_html.py gen_v1.py --out <shared folder>/<name>.html
+python3 scripts/chart_html.py */gen_v1.py --check   # every song's corrections still hold?
 ```
 
 **The data file** is Python that defines `SONG`. `title`, `artist`, `sections` and
@@ -272,8 +278,8 @@ SONG = dict(
   last section may include the bar that starts at the last downbeat (a final chord ringing
   out; set `duration_s` to the audio length).
 - `chords`: a lead-sheet symbol in every cell, repeated while it holds (`'Am7'`, `'E/G#'`
-  prints E (G♯), `'N.C.'` a rest). Never `chords_lv.json`'s Harte labels (`'A:min7'`,
-  `'E:maj/3'`, `'N'`): they are refused.
+  prints E (G♯), `'N.C.'` a rest). `chords_lv.json`'s Harte labels (`'A:min7'`,
+  `'E:maj/3'`, `'N'`) are converted to these.
 - `lyrics`: seed from `analysis/lyrics_aligned.json` (each line's `text` at its `where`),
   keep each anchor near the line's first sung word (only the order matters with the
   default `placement: 'sung'`), add words `align_lyrics.py` printed as `SUNG, NOT IN THE
@@ -286,7 +292,8 @@ SONG = dict(
   write literal braces as `{{ }}`.
 
 Required inputs: `foundation.json`, `chords_lv.json`, `chord_proposal.json` and
-`bass_per_cell.json` (evidence made on another grid is warned about: re-run it). Optional:
+`bass_per_cell.json` (evidence made on another grid is refused: re-run it, or
+`--allow-stale` to render with a warning). Optional:
 the words file (without one, lines stay whole at their anchor) and `stem_activity.json`
 (`scripts/stem_activity.py`: each stem's level per bar, 1.0 = its usual full level).
 

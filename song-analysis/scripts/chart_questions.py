@@ -11,8 +11,19 @@ a few at a time - and cells that break their section's repeating pattern even wh
 readers agree (pattern_breaks); each answer goes back into the data file (a fix in `chords`, the cell
 in `verified`), then re-render.
 
+Printed in the order the answers most often change the chart: the meter and beat 1 when
+they were Claude's call (foundation.json decided_by), pattern breaks, bass-less cells that
+differ from their parallel section (readers agreeing there prove little: with no bass
+they read the same guitar), then the "?" cells, then lines Whisper barely heard. Each
+cell question gives its time in the recording (m:ss-m:ss), so the player finds it by ear.
+
+Each run keeps the list it printed (analysis/questions_round.json); the next run, once
+the chart has changed, scores it against the chart - which listed cells the player
+changed, which they kept, and the fixes that were not on the list - into
+analysis/questions_log.jsonl: how well the questions find what the player fixes.
+
 Usage (python3, standard library only; from the song folder):
-    chart_questions.py gen_v1.py [--json analysis/questions.json] [--max 12]
+    chart_questions.py gen_v1.py [--json analysis/questions.json] [--max 12] [--no-log]
 """
 from __future__ import annotations
 
@@ -21,12 +32,29 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from chart_html import STOP, flags, lead_sheet  # noqa: E402
+from chart_html import STOP, Grid, flags, lead_sheet, mmss  # noqa: E402
 
 
 def load(a: Path, name: str, key: str = 'cells') -> list:
     p = a / name
     return json.loads(p.read_text()).get(key, []) if p.exists() else []
+
+
+def parallel_chords(S: dict, key: tuple) -> list:
+    """The chords the same position holds in the parallel sections (same kind): counted from
+    the start when the two are as long, else from the end (turnarounds close a section)."""
+    sec = next((s for s in S['sections'] if s[1] <= key[0] <= s[2]), None)
+    if sec is None:
+        return []
+    _, b0, b1, kind, *_ = sec
+    out = []
+    for n, p0, p1, k, *_ in S['sections']:
+        if k != kind or p0 == b0:
+            continue
+        pb = p0 + key[0] - b0 if p1 - p0 == b1 - b0 else p1 - (b1 - key[0])
+        if p0 <= pb <= p1:
+            out.append(S['chords'].get((pb, key[1])))
+    return out
 
 
 def questions(S: dict, a: Path) -> list[dict]:
@@ -37,22 +65,10 @@ def questions(S: dict, a: Path) -> list[dict]:
     stops = {b for b, k, v in load(a, 'band_level.json') if v < STOP}
     verified = {tuple(k) for k in S.get('verified', [])}
     open_ = sorted(k for k in flags(S, lv, tri, bass) if k not in verified and k[0] not in stops)
-    sec = {b: (n, b0) for n, b0, b1, *_ in S['sections'] for b in range(b0, b1 + 1)}
-    kinds = {}
-    for n, b0, b1, kind, *_ in S['sections']:
-        kinds.setdefault(kind, []).append((n, b0, b1))
+    sec = {b: n for n, b0, b1, *_ in S['sections'] for b in range(b0, b1 + 1)}
     out = []
     for key in open_:
-        name, b0 = sec.get(key[0], ('?', key[0]))
-        kind = next((k for n, s0, s1, k, *_ in S['sections'] if s0 <= key[0] <= s1), None)
-        b1 = next(s1 for n, s0, s1, *_ in S['sections'] if s0 == b0)
-        par = []                         # same length: count from the start; else from the end
-        for n, p0, p1 in kinds.get(kind, []):  # (turnarounds close a section)
-            if p0 == b0:
-                continue
-            pb = p0 + key[0] - b0 if p1 - p0 == b1 - b0 else p1 - (b1 - key[0])
-            if p0 <= pb <= p1:
-                par.append(S['chords'].get((pb, key[1])))
+        name, par = sec.get(key[0], '?'), parallel_chords(S, key)
         pcs = bass.get(key) or {}
         top = max(pcs, key=pcs.get) if pcs and max(pcs.values()) >= 0.15 else None
         chart = S['chords'][key]
@@ -102,6 +118,75 @@ def pattern_breaks(S: dict, agree: float = 0.65, repeats: int = 3) -> list[dict]
     return sorted(out, key=lambda x: (x['bar'], x['cell']))
 
 
+def parallel_breaks(S: dict, a: Path, skip: set = frozenset()) -> list[dict]:
+    """Cells with no bass (under 0.15 s of any note) charted another chord than every
+    parallel section plays there, where no reader objected (those are '?' cells already):
+    with no bass both readers hear the same guitar, so their agreement proves little - the
+    player's fixes came there (a bar charted Am that the other chorus plays G). Verified
+    cells, stop bars and the cells in skip are left out."""
+    bass = {(c['bar'], c['cell']): c['pc_seconds'] for c in load(a, 'bass_per_cell.json')}
+    stops = {b for b, k, v in load(a, 'band_level.json') if v < STOP}
+    verified = {tuple(k) for k in S.get('verified', [])}
+    sec = {b: n for n, b0, b1, *_ in S['sections'] for b in range(b0, b1 + 1)}
+    out = []
+    for key, ch in sorted(S['chords'].items()):
+        if ch == 'N.C.' or key in verified or key in skip or key[0] in stops:
+            continue
+        if max((bass.get(key) or {}).values(), default=0) >= 0.15:
+            continue
+        par = [p for p in parallel_chords(S, key) if p and p != 'N.C.']
+        if par and all(p == par[0] for p in par) and par[0] != ch:
+            out.append(dict(bar=key[0], cell=key[1], section=sec.get(key[0], '?'), chart=ch,
+                            parallel=par[0]))
+    return out
+
+
+def meter_question(F: dict) -> str | None:
+    """The meter and beat 1 to confirm first when Claude chose them (foundation.py meter
+    without --decided-by player): every bar-keyed answer depends on them."""
+    d = F.get('decided_by') or {}
+    if d.get('who') != 'agent' or not F.get('downbeat_times'):
+        return None
+    sig = F.get('time_signature', '?')
+    grp = '+'.join(map(str, F.get('grouping', [])))
+    t = F['downbeat_times'][0]
+    return (f"meter check: {sig} as {grp}, beat 1 at {mmss(t)} ({t:.2f} s) - "
+            f"{', '.join(d.get('what', []))} were Claude's call. Ask the player to count along "
+            f"from bar 1 first; once confirmed, re-run foundation.py meter with the same flags "
+            f"and --decided-by player")
+
+
+def timer(F: dict, S: dict):
+    """(bar, cell) -> 'm:ss.s-m:ss.s' in the recording ('' past the grid)."""
+    db, grouping = list(F.get('downbeat_times') or []), S.get('grouping') or F.get('grouping')
+    if len(db) < 2 or not grouping:
+        return lambda key: ''
+    g = Grid(db, list(grouping))
+
+    def when(key):
+        if not (1 <= key[0] < len(db)) or key[1] > g.n:
+            return ''
+        end = g.start(g.next(key)) if g.next(key)[0] < len(db) else db[-1]
+        tenths = lambda s: f'{int(s // 60)}:{s % 60:04.1f}'      # a half-bar can be 1 s
+        return f'{tenths(g.start(key))}-{tenths(end)}'
+    return when
+
+
+def score_round(prev: dict, S: dict) -> dict | None:
+    """Last round's list against the chart now: listed cells changed / kept, chord changes
+    not on the list. None when nothing changed since (no answers yet)."""
+    old = {tuple(map(int, k.split('.'))): v for k, v in prev.get('chords', {}).items()}
+    now = {k: lead_sheet(v) for k, v in S['chords'].items()}
+    ver = sorted(map(list, {tuple(k) for k in S.get('verified', [])}))
+    if old == now and ver == prev.get('verified', []):
+        return None
+    listed = {tuple(x[:2]) for x in prev.get('listed', [])}
+    changed = {k for k in set(old) | set(now) if old.get(k) != now.get(k)}
+    fix = lambda k: f'{k[0]}.{k[1]} {old.get(k)} -> {now.get(k)}'
+    return dict(listed=len(listed), changed=sorted(fix(k) for k in listed & changed),
+                kept=len(listed - changed), unlisted_fixes=sorted(fix(k) for k in changed - listed))
+
+
 def weak_lines(a: Path, share: float = 0.5) -> list[dict]:
     """Lines Whisper heard less than `share` of (lyrics_aligned.json 'matched'): their words
     are placed by misheard stand-ins or guesses - ask the player where they fall (a bridge
@@ -118,32 +203,66 @@ def main() -> None:
     ap.add_argument('data', help='the chart data file, e.g. gen_v1.py')
     ap.add_argument('--json', help='also write the questions here')
     ap.add_argument('--max', type=int, default=12)
+    ap.add_argument('--no-log', action='store_true',
+                    help='neither score the last round nor keep this one')
     a = ap.parse_args()
     S = runpy.run_path(a.data)['SONG']
     folder = Path(S.get('folder') or Path(a.data).resolve().parent)
-    qs = questions(S, folder / 'analysis')
+    an = folder / 'analysis'
+    fp = an / 'foundation.json'
+    F = json.loads(fp.read_text()) if fp.exists() else {}
+    when = timer(F, S)
+    at = lambda key: f" at {when(key)}" if when(key) else ''
+    half = lambda c: 'first' if c == 1 else 'second' if c == 2 else f'cell {c}'
+    rnd, log = an / 'questions_round.json', an / 'questions_log.jsonl'
+    if not a.no_log and rnd.exists():
+        r = score_round(json.loads(rnd.read_text()), S)
+        if r:
+            with open(log, 'a') as f:
+                f.write(json.dumps(r) + '\n')
+            print(f"last round's list: {r['listed']} cells - {len(r['changed'])} changed, "
+                  f"{r['kept']} kept" + (f"; fixes not on the list: {', '.join(r['unlisted_fixes'])}"
+                                         if r['unlisted_fixes'] else '') + f' (-> {log.name})')
+    mq = meter_question(F)
+    if mq:
+        print(mq)
+    breaks = pattern_breaks(S)
+    for b in breaks:
+        print(f"pattern break: bar {b['bar']} ({half(b['cell'])} half, {b['section']}){at((b['bar'], b['cell']))}: "
+              f"chart {b['chart']}, but the section plays {b['usual']} there every other time (bars "
+              f"{', '.join(map(str, b['like']))}) -> ask: {b['chart']} / {b['usual']}?")
+    qs = questions(S, an)
+    asked = {(b['bar'], b['cell']) for b in breaks} | {(q['bar'], q['cell']) for q in qs}
+    pars = parallel_breaks(S, an, asked)
+    for p in pars:
+        print(f"parallel check: bar {p['bar']} ({half(p['cell'])} half, {p['section']}){at((p['bar'], p['cell']))}: "
+              f"chart {p['chart']}, the parallel section plays {p['parallel']}, no bass to "
+              f"decide -> ask: {p['chart']} / {p['parallel']}?")
     if not qs:
         print('no open chord calls: every "?" is verified or in a stop bar')
+    qs.sort(key=lambda q: (not any(p != q['chart'] for p in q['parallel']), q['bar'], q['cell']))
     for q in qs[:a.max]:
-        half = 'first' if q['cell'] == 1 else 'second'
         par = f", parallel section: {'/'.join(q['parallel'])}" if q['parallel'] else ''
-        print(f"bar {q['bar']} ({half} half, {q['section']}): chart {q['chart']}; lv-chordia "
-              f"{q['lv']}, triads {q['triads']}, bass {q['bass'] or 'none'}{par} -> "
-              f"ask: {' / '.join(q['options'])}?")
+        print(f"bar {q['bar']} ({half(q['cell'])} half, {q['section']}){at((q['bar'], q['cell']))}: "
+              f"chart {q['chart']}; lv-chordia {q['lv']}, triads {q['triads']}, bass "
+              f"{q['bass'] or 'none'}{par} -> ask: {' / '.join(q['options'])}?")
     if len(qs) > a.max:
         print(f'... {len(qs) - a.max} more (--max)')
-    for b in pattern_breaks(S):
-        half = 'first' if b['cell'] == 1 else 'second'
-        print(f"pattern break: bar {b['bar']} ({half} half, {b['section']}): chart {b['chart']}, "
-              f"but the section plays {b['usual']} there every other time (bars "
-              f"{', '.join(map(str, b['like']))}) -> ask: {b['chart']} / {b['usual']}?")
-    weak = weak_lines(folder / 'analysis')
+    weak = weak_lines(an)
     for w in weak:
-        at = 'bar %d.%d' % tuple(w['where']) if w['where'] else 'unplaced'
-        print(f"placement check: the line starting '{w['start']}…' ({at}) - Whisper heard "
+        where = 'bar %d.%d' % tuple(w['where']) if w['where'] else 'unplaced'
+        tm = at(tuple(w['where'])) if w['where'] else ''
+        print(f"placement check: the line starting '{w['start']}…' ({where}{tm}) - Whisper heard "
               f"{w['matched']:.0%} of its words; ask where each word falls")
     if a.json:
         Path(a.json).write_text(json.dumps(qs, indent=1))
+    if not a.no_log and an.is_dir():
+        listed = ([[b['bar'], b['cell'], 'pattern'] for b in breaks] +
+                  [[p['bar'], p['cell'], 'parallel'] for p in pars] +
+                  [[q['bar'], q['cell'], 'reader'] for q in qs[:a.max]])
+        rnd.write_text(json.dumps(dict(
+            listed=listed, verified=sorted(map(list, {tuple(k) for k in S.get('verified', [])})),
+            chords={f'{b}.{c}': lead_sheet(v) for (b, c), v in sorted(S['chords'].items())})))
 
 
 if __name__ == '__main__':

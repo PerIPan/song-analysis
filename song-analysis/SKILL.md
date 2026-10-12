@@ -55,7 +55,8 @@ commentary (Phase 8). The JSON artifacts are working files, not the answer.
 `<venv>` = the analysis venv; Whisper, lv-chordia and yt-dlp have their own
 (`references/environment-setup.md`). Below, `ST=stems/htdemucs_ft/<song>`. After any
 phase, `scripts/validate_artifacts.py analysis` checks the hand-offs (grid, grouping,
-cell coverage, time order) — run it before building on a result.
+cell coverage, cells made on another grid, time order) — run it before building on a
+result; `--check-cache` before the first model step (then `HF_HUB_OFFLINE=1`).
 
 **Run order.** Start stems (Phase 2) in the background first — several songs one after
 another, not at once, on one GPU — and do Phase 1 and the lyrics meanwhile. Whisper
@@ -180,9 +181,12 @@ reports INCONCLUSIVE or a bare duple; the bass and harmonic bands carry the mete
 2-and-4 backbeat can't tell pulse 0 from pulse 2. When you must pick beat 1 yourself,
 weigh (strongest first): the first full-band hit at the song's start (a drum-only pickup
 before it is common); the phase where bass and chords change (Phase 4 downbeat check).
-Cymbal accents alone are weak — a crash pattern can sit on beat 3. `--cycle` and
-`--downbeat-pulse` are recorded as `user` in `provenance`; if you chose them, not the
-player, say so in the chart header and list it as an open question.
+Cymbal accents alone are weak — a crash pattern can sit on beat 3. Whoever chose what
+the flags set is recorded: add `--decided-by player` when the player counted it; without
+it the provenance says `agent` (Claude's call), the script says so, and
+`chart_questions.py` makes the meter and beat 1 its first question — say so in the chart
+header until the player confirms. A question exits 2 (`NEEDS A DECISION` on stderr); 1 is
+an error.
 
 **Cells.** Everything downstream (bass, chords, lyrics, chart) is keyed by `(bar, cell)`,
 one cell per group in `grouping`: 4/4 → 2+2 (the familiar half-bars), 3/4 → one cell,
@@ -197,7 +201,7 @@ slow songs (60–90 BPM) — count along. A `num_bars` far from
 
 ```bash
 <venv>/bin/python scripts/bass_notes.py $ST/bass.wav --foundation analysis/foundation.json \
-    --bass-entry-bar <N> --outdir analysis
+    [--bass-entry-bar <N>] --outdir analysis
 <venv>/bin/python scripts/mode_test.py --other $ST/other.wav \
     --foundation analysis/foundation.json --bass-cells analysis/bass_per_cell.json \
     [--sections analysis/sections.json] --out analysis/mode.json
@@ -226,8 +230,10 @@ for sharp keys — in F♯ minor a flat table writes the tonic `G♭m` and the d
 - Sub-0.5 s detections are noisy; ≥ 0.7 s sustained notes are usually right.
 - Bass pedals, walks, sits on 3rds/5ths — it's a *clue* to the root, not the chord.
 - **Bass enters late** in most songs: `bass_notes.py` prints `BASS ENTRY: bar N` when it
-  finds one — re-run it with `--bass-entry-bar N` and pass the same to `chord_proposal.py`
-  (earlier notes are stem bleed).
+  finds one — re-run it with `--bass-entry-bar N` (earlier notes are stem bleed);
+  `chord_proposal.py` reads the bar from `bass_notes.json` and warns if it was skipped.
+- `bass.mid` is timed in seconds at pretty_midi's 120 BPM, not on the song's bars: in a
+  DAW, place notes through the beat grid (`ableton-mcp` → "Timing").
 
 ## Phase 4b — Performance: the drummer's hits and the guitar's strumming
 
@@ -307,8 +313,8 @@ lyric-anchored boundaries within ±1 bar on the one reference song with section 
 
 ```bash
 <venv>/bin/python scripts/chord_proposal.py --other $ST/other.wav --bass $ST/bass.wav \
-    --foundation analysis/foundation.json --bass-entry-bar <N> \
-    --out analysis/chord_proposal.json                           # triad cross-check
+    --foundation analysis/foundation.json \
+    --out analysis/chord_proposal.json      # triad cross-check; bass entry bar from bass_notes.json
 <lv-venv>/bin/python scripts/lv_chords.py <song.mp3> --foundation analysis/foundation.json \
     --compare analysis/chord_proposal.json --out analysis/chords_lv.json
 ```
@@ -345,6 +351,9 @@ read G. In bass-less cells, chart what the parallel section plays and list it fo
 python3 scripts/chart_html.py gen_v1.py          # in the song folder; --out to write elsewhere
 ```
 
+`chart_html.py` refuses evidence made on another grid (beat 1 moved since: re-run it;
+`--allow-stale` renders anyway) and checks the player's `corrections` on every render.
+
 The chart is rendered: you write the decisions (sections, a chord per `(bar, cell)`, each
 lyric line at its anchor cell, the header, provenance and commentary) as a `SONG` dict in
 `gen_v<N>.py` (a new N per revision); `chart_html.py` reads everything measured from
@@ -368,17 +377,30 @@ converts them. Read `references/chart-and-lyrics.md` first. Core invariants:
 
 **Player check — ask, don't wait.** A "?" in a printed chart waits for someone to notice
 it; a player on their instrument answers in seconds. After rendering, run
-`python3 scripts/chart_questions.py gen_v1.py` (the open cells: chart chord, what
-lv-chordia, the triads and the bass heard, the parallel section's chord; also any cell that
-breaks its section's repeating pattern even where the readers agree — on La Luz all four
-of the player's chord fixes were such breaks) and ask the
-player directly, up to four cells per round, the chart's chord first; ask the same way
-about `SUNG, NOT IN THE TEXT` words and the lines it lists as `placement check` (Whisper
-heard under half of them — on Body Heat the bridge, placed one to two beats early, line
-after line, until the player pinned each word: `'fixed'` lyrics). Put each answer in the
-data file (a fix in `chords`, the cell in `verified`, a word in the lyrics), re-render, and
-say in `provenance` what the player checked. On Body Heat six cells took one round, and
-the chart printed with no "?".
+`python3 scripts/chart_questions.py gen_v1.py` and ask the player directly, up to four
+cells per round, the chart's chord first, in the order it prints them (the order answers
+most often change the chart): the meter and beat 1 if they were Claude's call; cells that
+break their section's repeating pattern even where the readers agree (on one song all four
+of the player's chord fixes were such breaks); bass-less cells charted unlike their
+parallel section; the "?" cells (what lv-chordia, the triads and the bass heard); then the
+lines it lists as `placement check` (Whisper heard under half of them — one bridge came
+out one to two beats early, line after line, until the player pinned each word: `'fixed'`
+lyrics) and any `SUNG, NOT IN THE TEXT` words. Every cell question carries its time in
+the recording (m:ss.s), so the player finds it by ear, not by bar number. Each run keeps
+its list and, once the chart has changed, scores the last one (changed, kept, fixes not on
+the list) into `analysis/questions_log.jsonl` — how well the questions find what the
+player fixes.
+
+**While the player corrects — data only, rules after.** One song's correction session cost
+two hours when each fix also changed the renderer, ran the tests, re-printed the shared
+PDF and made a commit. Instead, per fix: edit only the data file (a fix in `chords`, the
+cell in `verified`, a word as a `'fixed'` lyric or in `stops`), add it to `corrections`
+(`(bar, cell, 'chord' | 'word', value, 'player', date)`), re-render the draft locally. No
+renderer edits, commits, PDFs or shared-folder writes during the session. After it, if
+fixes show a rule is wrong, change the rule once, then `chart_html.py --check` every
+charted song (each one's `corrections` must still hold) before committing, and re-render
+the charts the change touches. Publish to the band only when the player says the chart is
+ready. Say in `provenance` what the player checked.
 
 **What next (Live optional).** Only if the Live skills are installed and
 `mcp__ableton__health_check` answers, ask once: "The chart is done. Want a **sketch in
@@ -446,7 +468,8 @@ declaring the chart done.
    stem doesn't contain. Floor it at the instrument's range (C3 for a piano out of
    `other.wav`) before pushing anything to Ableton.
 6. A chart correction is a data-file edit (chords, sections, lyric anchors) plus a
-   re-render; the renderer redoes the rows and the lyric cascade.
+   re-render, recorded in `corrections`; the renderer redoes the rows and the lyric
+   cascade. Rules change after the session, against every song's corrections.
 7. Mirror parallel sections visually; overlay section-boundary pickups in the same cell.
 
 ## Local environment

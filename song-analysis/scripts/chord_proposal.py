@@ -15,8 +15,12 @@ Usage (analysis venv; needs numpy + librosa):
     <venv>/bin/python chord_proposal.py --other stems/htdemucs_ft/<song>/other.wav \
         --bass stems/htdemucs_ft/<song>/bass.wav --foundation analysis/foundation.json \
         [--grouping 6,5] [--bass-entry-bar 5] [--out analysis/chord_proposal.json]
+
+Without --bass-entry-bar the bar comes from bass_notes.json next to foundation.json (the
+bar bass_notes.py used), with a warning when bass_notes suggested a later one.
 """
 import argparse, json, sys
+from pathlib import Path
 import numpy as np
 import librosa
 
@@ -76,14 +80,31 @@ def propose(cell_chroma, bass_pc, T, major_bias):
     return order, top, relaxed
 
 
+def entry_from_bass_notes(path):
+    """The bass entry bar bass_notes.py used (1 without the file); warns when it suggested
+    a later bar than it used - the bass notes before it are probably stem bleed."""
+    if not path.exists():
+        return 1
+    B = json.load(open(path))
+    used, hint = B.get("bass_entry_bar", 1), B.get("suggested_entry_bar", 1)
+    if hint > used:
+        print(f"WARNING: bass_notes.py suggests the bass enters at bar {hint} but ran from bar "
+              f"{used}: re-run it with --bass-entry-bar {hint} first (or pass "
+              f"--bass-entry-bar here)")
+    elif used > 1:
+        print(f"bass entry bar {used} (from {path.name})")
+    return used
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--other", required=True, help="harmonic stem (other.wav)")
     ap.add_argument("--bass", help="bass stem; without it there is no root constraint")
     ap.add_argument("--foundation", required=True, help="foundation.json")
     ap.add_argument("--grouping", help="override, e.g. 2,2 or 6,5")
-    ap.add_argument("--bass-entry-bar", type=int, default=1,
-                    help="ignore the bass before this bar (pre-entry content is bleed)")
+    ap.add_argument("--bass-entry-bar", type=int,
+                    help="ignore the bass before this bar (pre-entry content is bleed); "
+                         "default: bass_notes.json's, else 1")
     ap.add_argument("--major-bias", type=float, default=0.0)
     ap.add_argument("--bias-diff", type=float, default=0.05,
                     help="second pass with this bias; reports flips (0 = skip)")
@@ -91,6 +112,8 @@ def main():
     a = ap.parse_args()
 
     F = json.load(open(a.foundation))
+    if a.bass_entry_bar is None:
+        a.bass_entry_bar = entry_from_bass_notes(Path(a.foundation).with_name("bass_notes.json"))
     grouping = [int(x) for x in a.grouping.split(",")] if a.grouping else F.get("grouping")
     if not grouping:
         sys.exit("No grouping. Run detect_meter.py first and set foundation.json "

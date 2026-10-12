@@ -4,26 +4,31 @@
 The data file holds what a person decides - chords per cell, sections, lyric anchors,
 commentary. Everything measured is read from the song's analysis/ folder, so an upstream
 re-run that keeps the bar grid re-renders without editing (a moved beat 1 shifts every
-(bar, cell) key). Lyric lines anchor at the cell of the chord they resolve into (Rule 1,
-references/chart-and-lyrics.md) and are split over the cells where Whisper heard their
-words: pickup words sung before the anchor are pulled into it, nothing spills past the
-next line's anchor or out of the line's section (a pickup or ad-lib shares its cell), a
-line never takes words an earlier line matched (a repeated line keeps its own) nor the
-next line's words sung nearer its anchor (a repeat Whisper heard once), and words Whisper
-missed are interpolated between heard ones, a beat apart after the last (a
-beat = the bar / the grouping's pulse count, so an eighth in 11/8). A cell gets a "?" when
+(bar, cell) key, and evidence made on another grid stops the render). Lyric lines anchor
+at the cell of the chord they resolve into (Rule 1, references/chart-and-lyrics.md) and
+are split over the cells where Whisper heard their words: each word in the cell where it
+is sung (placement 'sung', the default; 'anchor' pulls words sung before the anchor into
+it), nothing spills past the next line's anchor or out of the line's section (a pickup or
+ad-lib shares its cell), a line never takes words an earlier line matched (a repeated line
+keeps its own) nor the next line's words sung nearer its anchor (a repeat Whisper heard
+once), and words Whisper missed are interpolated between heard ones, a beat apart after
+the last (a beat = the bar / the grouping's pulse count, so an eighth in 11/8). The
+player's corrections ('corrections') are checked on every render. A cell gets a "?" when
 lv-chordia names another root than the chart, or when the triad reader does and the bass
 contradicts the chart too (the pitch class it sounds longest in the cell, 0.15 s or more,
 is neither the root nor the slash bass). Near-ties and triad-only objections are not
 marked: on real songs they flagged 20-50% of cells, mostly sus/add9 voicings. A cell whose
 lv-chordia chord covers under half of it (a change inside) gets a dashed underline.
-Evidence made on another grid, or with another grouping, is warned about. Columns keep
+Evidence made on another grid, or with another grouping, is refused (--allow-stale:
+warned about, and rendered). Columns keep
 their share of the row whatever the labels: a label too wide for its cell (a phone, print)
 shrinks to fit, next to room kept for a "?"; a section's name prints on its first row only
 ('repeat_sections' puts it on every row), and the song map's meters print without background graphics.
 
 Usage (python3, standard library only):
     chart_html.py <song>/gen_v1.py [--out PATH]     # default <folder>/<out>
+    chart_html.py <song>/gen_v1.py ... --check      # nothing written; exit 1 when a
+                                                    # player correction no longer holds
     from chart_html import render; render(SONG)     # returns the path written
 
 Reads <folder>/analysis/: foundation.json (downbeat_times, grouping, pulse_unit),
@@ -35,8 +40,8 @@ named by 'words'.
 SONG, the dict the data file defines. Cells are keyed (bar, cell): bars count from 1 on the
 audio's bar grid, cells from 1, one per group of the grouping (4/4 as [2, 2]: beats 1-2 and
 3-4; 11/8 as [6, 5]: two unequal cells; 3/4: one). Values marked html go in as-is (write
-&amp; for &); all other text is escaped. An unknown key, a wrong shape or type, an unknown
-kind or a Harte chord label is refused with the reason.
+&amp; for &); all other text is escaped. An unknown key, a wrong shape or type or an
+unknown kind is refused with the reason.
   Required
     title, artist   str
     sections        [(name, first_bar, last_bar, kind, note_html[, harmony_html])] covering
@@ -48,8 +53,8 @@ kind or a Harte chord label is refused with the reason.
                     run one bar past the last downbeat (a chord ringing out).
     chords          {(bar, cell): label}, lead-sheet symbols: 'Cmaj7', 'F#m7', 'Em/D' (slash
                     + note name = bass note; 'C6/9' is one chord), 'N.C.'; # and b print as
-                    sharp and flat signs. Not chords_lv.json's Harte labels ('A:min7').
-                    No entry = empty (hold).
+                    sharp and flat signs. chords_lv.json's Harte labels ('A:min7', 'G/5',
+                    'N') are converted to these. No entry = empty (hold).
   Optional (a key set to None counts as left out)
     folder          song folder holding analysis/. Default, and base of a relative path:
                     the data file's folder (render() called directly: the working dir)
@@ -80,6 +85,11 @@ kind or a Harte chord label is refused with the reason.
                     'anchor': words sung before a line's anchor are pulled into it
     verified        [(bar, cell), ...] a player confirmed (JSON-style [bar, cell] lists do
                     too): no "?" or split mark there (say who checked in provenance)
+    corrections     [(bar, cell, kind, value[, source[, date]])] what a player corrected,
+                    checked on every render (a warning when one no longer holds; --check
+                    exits 1): kind 'chord' (the cell's chord is value) or 'word' (the
+                    cell's lyric starts with value). Not printed - the fixes themselves
+                    live in chords / lyrics / stops; this is their regression test
     grouping        overrides foundation.json's; must match the grid the analysis used
     bars_per_row    a whole number >= 1; default max(1, 8 // cells per bar): 4 bars of
                     4/4, 8 of 3/4
@@ -644,7 +654,8 @@ SPLIT_CSS = ('.half.split .chord{text-decoration:underline dashed #b58632;'
 ADLIB_CSS = '.lyric .adlib{color:#aaa;margin-left:.45em}'
 KEYS = {'title', 'artist', 'sections', 'chords', 'folder', 'out', 'key_short', 'lyrics',
         'words', 'bass_notes', 'verified', 'placement', 'stops', 'repeat_sections', 'grouping', 'bars_per_row', 'duration_s', 'subline',
-        'facts', 'provenance', 'map_note', 'notes', 'method'}
+        'facts', 'provenance', 'map_note', 'notes', 'method', 'corrections'}
+CORRECTION_KINDS = ('chord', 'word')
 KINDS = ('intro', 'verse', 'post', 'chorus', 'bridge', 'inst', 'outro')
 LYRIC_KINDS = ('', 'adlib', 'fixed', *(f'pk pk-{k}' for k in KINDS))
 NOTE_CLASSES = ('', 'open', 'reading')
@@ -720,6 +731,14 @@ def check_song(S: dict) -> None:
             for k in v)):
         raise ValueError("'verified' must be a list of (bar, cell) pairs, e.g. [(9, 1), "
                          f"(12, 2)] or [[9, 1], [12, 2]]; got {short(v)}")
+    v = S.get('corrections', [])
+    bad = [x for x in v if not (isinstance(x, (list, tuple)) and 4 <= len(x) <= 6
+                                and whole(x[0]) and whole(x[1]) and x[2] in CORRECTION_KINDS
+                                and text(*x[3:]))] if isinstance(v, (list, tuple)) else [v]
+    if bad:
+        raise ValueError(f"'corrections' takes (bar, cell, kind, value[, source[, date]]) "
+                         f"tuples, kind {' or '.join(map(repr, CORRECTION_KINDS))} and text "
+                         f'after it: {short(bad[0])}')
     v = S.get('bars_per_row', 1)
     if not (whole(v) and v >= 1):
         raise ValueError(f"'bars_per_row' must be a whole number of bars, 1 or more; got "
@@ -750,7 +769,8 @@ def check(S: dict, grid: Grid, last_bar: int) -> None:
         raise ValueError(f'sections run to bar {last_bar}; the beat grid has {nbars} bars '
                          '(one bar past the last downbeat is allowed)')
     bad = sorted(k for k in (*S['chords'], *S.get('lyrics', {}), *S.get('bass_notes', {}),
-                             *map(tuple, S.get('verified', [])))
+                             *map(tuple, S.get('verified', [])),
+                             *(tuple(c[:2]) for c in S.get('corrections', [])))
                  if not (1 <= k[0] <= last_bar and 1 <= k[1] <= grid.n))
     if bad:
         raise ValueError(f'cells outside the sections (bars 1-{last_bar}) or the '
@@ -780,8 +800,45 @@ def load_json(path: Path):
         raise ValueError(f'{path}: not JSON ({e})') from None
 
 
-def render(S: dict, out: str | Path | None = None) -> Path:
+def correction_failures(S: dict, lyr: dict) -> list[str]:
+    """The player's corrections the chart no longer shows, one line each."""
+    out = []
+    for bar, cell, kind, value, *_ in S.get('corrections', ()):
+        k = (bar, cell)
+        if kind == 'chord' and S['chords'].get(k) != lead_sheet(value):
+            out.append(f"bar {bar}.{cell}: chord {value!r}, the chart has "
+                       f"{S['chords'].get(k)!r}")
+        elif kind == 'word' and not (lyr.get(k) or '').startswith(value):
+            out.append(f"bar {bar}.{cell}: lyric starting {value!r}, rendered "
+                       f"{lyr.get(k, '')!r}")
+    return out
+
+
+def render(S: dict, out: str | Path | None = None, allow_stale: bool = False) -> Path:
     """Write the chart for SONG dict S to out (default <folder>/<out>); returns the path."""
+    doc, info = compose(S, allow_stale)
+    out = Path(out) if out else info['default_out']
+    out.write_text(doc, encoding='utf-8')
+    st = info['stats']
+    print(f"wrote {out}: {st['cells']} chord cells, lv-chordia root agrees {st['lv']}, "
+          f"triads {st['tri']}, {info['n_q']} marked '?', {info['n_split']} split, "
+          f"{info['n_lyric']} lyric cells")
+    report_corrections(info)
+    return out
+
+
+def report_corrections(info: dict) -> None:
+    n, bad = info['n_corrections'], info['failed']
+    if n:
+        print(f'player corrections: {n - len(bad)}/{n} hold')
+    for line in bad:
+        print(f'warning: a player correction no longer holds - {line}', file=sys.stderr)
+
+
+def compose(S: dict, allow_stale: bool = False) -> tuple[str, dict]:
+    """The chart's HTML for SONG dict S, and what render() reports: stats, '?' and split
+    counts, lyric cells, the default output path, the player corrections and those that
+    no longer hold."""
     S = {k: v for k, v in S.items() if v is not None}      # None = left out
     if isinstance(S.get('chords'), dict):                  # accept chords_lv.json's labels
         S['chords'] = {k: lead_sheet(c) if isinstance(c, str) else c
@@ -802,15 +859,20 @@ def render(S: dict, out: str | Path | None = None) -> Path:
         db.append(end if end > db[-1] else 2 * db[-1] - db[-2])
     grid = Grid(db, grouping)
     check(S, grid, last_bar)
-    LV, TRI = rd('chords_lv.json'), rd('chord_proposal.json')
-    for name, doc in (('chords_lv.json', LV), ('chord_proposal.json', TRI)):
+    LV, TRI, BASS = rd('chords_lv.json'), rd('chord_proposal.json'), rd('bass_per_cell.json')
+    for name, doc in (('chords_lv.json', LV), ('chord_proposal.json', TRI),
+                      ('bass_per_cell.json', BASS)):
         why = off_grid(doc, grid, grouping)
+        if why and not allow_stale:
+            raise ValueError(f'{name} was made on another grid ({why}): beat 1 or the bars '
+                             'moved since - re-run it (--allow-stale renders anyway, with '
+                             '"?" and split marks that may be wrong)')
         if why:
             print(f'warning: {name} was made on another grid ({why}) - re-run it; the "?" and '
                   'split marks may be wrong', file=sys.stderr)
     lv = {(c['bar'], c['cell']): c for c in LV['cells']}
     tri = {(c['bar'], c['cell']): c for c in TRI['cells']}
-    bass = {(c['bar'], c['cell']): c['pc_seconds'] for c in rd('bass_per_cell.json')['cells']}
+    bass = {(c['bar'], c['cell']): c['pc_seconds'] for c in BASS['cells']}
     act = rd('stem_activity.json') if (a / 'stem_activity.json').exists() else {}
     bl = rd('band_level.json') if (a / 'band_level.json').exists() else {}
     out_cells = {(b, k) for b, k, v in bl.get('cells', []) if v < STOP
@@ -918,13 +980,11 @@ def render(S: dict, out: str | Path | None = None) -> Path:
 </body></html>
 """
     default = re.sub(r'[\\/:]', '-', f"{S['artist']} - {S['title']} - Chords.html")
-    out = Path(out) if out else folder / S.get('out', default)
-    out.write_text(doc, encoding='utf-8')
     n_ly = len(set(lyr) | {k for k, (_, kind) in over.items() if kind == 'adlib'})
-    print(f"wrote {out}: {st['cells']} chord cells, lv-chordia root agrees {st['lv']}, "
-          f"triads {st['tri']}, {len(flagged)} marked '?', {len(split)} split, "
-          f"{n_ly} lyric cells")
-    return out
+    return doc, dict(stats=st, n_q=len(flagged), n_split=len(split), n_lyric=n_ly,
+                     default_out=folder / S.get('out', default),
+                     n_corrections=len(S.get('corrections', ())),
+                     failed=correction_failures(S, lyr))
 
 
 def load_song(path: str | Path) -> dict:
@@ -947,16 +1007,32 @@ def load_song(path: str | Path) -> dict:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("song", help="chart data file defining SONG, e.g. <song folder>/gen_v1.py")
-    ap.add_argument("--out", help="HTML path (default: <folder>/<SONG['out']>)")
+    ap.add_argument("song", nargs="+",
+                    help="chart data file(s) defining SONG, e.g. <song folder>/gen_v1.py")
+    ap.add_argument("--out", help="HTML path, one data file only (default: <folder>/<SONG['out']>)")
+    ap.add_argument("--check", action="store_true",
+                    help="write nothing; exit 1 when a player correction no longer holds")
+    ap.add_argument("--allow-stale", action="store_true",
+                    help="render evidence made on another grid (with a warning)")
     a = ap.parse_args()
+    if a.out and len(a.song) > 1:
+        ap.error("--out takes one data file")
     sys.dont_write_bytecode = True                # no __pycache__ in the song folder
-    try:
-        render(load_song(a.song), a.out)
-    except (OSError, ValueError) as e:
-        sys.exit(f'chart_html: {e}')
-    except Exception as e:     # anything else wrong in the data file or analysis/: no traceback
-        sys.exit(f'chart_html: {type(e).__name__}: {e}')
+    failed = 0
+    for song in a.song:
+        try:
+            if a.check:
+                _, info = compose(load_song(song), a.allow_stale)
+                print(f'{song}:', end=' ')
+                report_corrections(info) if info['n_corrections'] else print('no corrections')
+                failed += bool(info['failed'])
+            else:
+                render(load_song(song), a.out, a.allow_stale)
+        except (OSError, ValueError) as e:
+            sys.exit(f'chart_html: {e}')
+        except Exception as e:  # anything else wrong in the data file or analysis/: no traceback
+            sys.exit(f'chart_html: {type(e).__name__}: {e}')
+    sys.exit(1 if failed else 0)
 
 
 if __name__ == "__main__":

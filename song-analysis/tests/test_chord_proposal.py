@@ -4,7 +4,8 @@
 A-minor progression in 4/4 (grouping 2+2) rendered as sine triads over a sine bass.
 Checks: minor chords stay minor at the default bias of 0; a first-inversion chord
 (G/B, bass on the 3rd) is relaxed to G instead of forced to Bm; the harmonic-minor
-V (E) is major; flat spelling in A minor.
+V (E) is major; flat spelling in A minor; without --bass-entry-bar the bar comes
+from bass_notes.json, with a warning when bass_notes suggested a later one.
 
 Run with the analysis venv (numpy, librosa, soundfile):
     <venv>/bin/python tests/test_chord_proposal.py
@@ -49,7 +50,18 @@ def main():
         if r.returncode:
             print(r.stderr); sys.exit(1)
         cells = json.load(open(out))["cells"]
+        json.dump({"bass_entry_bar": 3, "suggested_entry_bar": 5}, open(Path(d) / "bass_notes.json", "w"))
+        r2 = subprocess.run([sys.executable, str(SCRIPT), "--other", str(o), "--bass", str(b),
+                             "--foundation", str(f), "--out", str(out), "--bias-diff", "0"],
+                            capture_output=True, text=True)
+        late = json.load(open(out))["cells"]
     fails = 0
+    ok = (r2.returncode == 0 and "re-run it with --bass-entry-bar 5" in r2.stdout
+          and all(c["bass"] is None for c in late if c["bar"] < 3)
+          and any(c["bass"] for c in late if c["bar"] >= 3))
+    fails += not ok
+    print(f"{'PASS' if ok else 'FAIL'}  no --bass-entry-bar: bass_notes.json's bar 3 used, its "
+          f"later suggestion (5) warned about")
     for bar, (_, _, want) in enumerate(PROG, start=1):
         got = [c["chord"] for c in cells if c["bar"] == bar]
         ok = got and all(g == want for g in got)

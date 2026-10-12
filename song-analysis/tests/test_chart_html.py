@@ -376,10 +376,18 @@ def main():
     F = json.loads((d / "analysis" / "foundation.json").read_text(encoding="utf-8"))
     F["downbeat_times"] = [t + 1.0 for t in F["downbeat_times"]]     # beat 1 moved half a bar
     (d / "analysis" / "foundation.json").write_text(json.dumps(F), encoding="utf-8")
-    with contextlib.redirect_stderr(err):
+    try:
         build(S, d, "stale.html")
-    check("evidence from another grid: warning", "chords_lv.json was made on another grid"
-          in err.getvalue() and "chord_proposal.json" in err.getvalue(), err.getvalue())
+        check("evidence from another grid: refused", False, "rendered")
+    except ValueError as e:
+        check("evidence from another grid: refused", "chords_lv.json was made on another grid"
+              in str(e) and "--allow-stale" in str(e), e)
+    with contextlib.redirect_stderr(err):
+        render(dict(S, folder=str(d)), out=d / "stale.html", allow_stale=True)
+    check("--allow-stale: rendered, with a warning per stale file",
+          "chords_lv.json was made on another grid" in err.getvalue()
+          and "chord_proposal.json" in err.getvalue() and (d / "stale.html").exists(),
+          err.getvalue())
 
     # ------------------------------------------------------------ 11/8 as 6+5
     ch = {(b, c): "Am" for b in range(1, 6) for c in (1, 2)}
@@ -551,6 +559,30 @@ def main():
         check(f"CLI: {name}", r.returncode == 0 if needle is None else
               r.returncode == 1 and needle in r.stderr and "Traceback" not in r.stderr,
               r.stderr)
+    fix = lambda name, c: (d / name).write_text(
+        "SONG = dict(title='Fix', artist='Nobody', chords={(1, 1): 'C', (2, 2): 'G'},\n"
+        "            lyrics={(1, 1): ('Hold on', 'fixed')},\n"
+        f"            corrections=[(1, 1, 'word', 'Hold'), {c}],\n"
+        "            sections=[('Verse', 1, 2, 'verse', '')])\n", encoding="utf-8")
+    fix("fix.py", "(2, 2, 'chord', 'G', 'player', '2026-10-12')")
+    fix("broke.py", "(2, 2, 'chord', 'A:min')")
+    r = run(str(d / "fix.py"), "--check")
+    check("CLI --check: corrections that hold -> exit 0, nothing written", r.returncode == 0
+          and "2/2 hold" in r.stdout and not (d / "Nobody - Fix - Chords.html").exists(),
+          r.stdout + r.stderr)
+    r = run(str(d / "fix.py"), str(d / "broke.py"), "--check")
+    check("CLI --check over two files: one broken -> exit 1, names the cell", r.returncode == 1
+          and "1/2 hold" in r.stdout and "bar 2.2: chord 'A:min', the chart has 'G'" in r.stderr,
+          r.stdout + r.stderr)
+    r = run(str(d / "broke.py"), "--out", "broke.html")
+    check("CLI render: a broken correction warns, still renders", r.returncode == 0
+          and "no longer holds" in r.stderr and (cwd / "broke.html").exists(), r.stderr)
+    fix("kind.py", "(2, 2, 'beat', 'G')")
+    r = run(str(d / "kind.py"), "--check")
+    check("CLI: a correction of an unknown kind is refused", r.returncode == 1
+          and "'corrections' takes" in r.stderr, r.stderr)
+    r = run(str(d / "fix.py"), str(d / "broke.py"), "--out", "two.html")
+    check("CLI: --out with two data files refused", r.returncode == 2, r.stderr)
     (d / "analysis" / "bass_per_cell.json").write_text('{"cells": [{"bar": 1}]}',
                                                         encoding="utf-8")
     r = run(str(d / "gen_v1.py"))
