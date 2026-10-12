@@ -22,7 +22,8 @@ it). The stems go to stems/htdemucs_ft/<slug>/ (and htdemucs_6s, unless --no-6s)
 folder analysed by hand is picked up as it is - steps whose outputs exist are adopted as
 done, the meter, tempo-octave and bass-entry choices it was made with become its answers
 (so a re-run keeps them), and a script edit alone doesn't re-run an adopted step. The chart step renders
-the newest gen_v<N>.py and lists the player's questions; without one it says to write it.
+the newest gen_v<N>.py and lists the player's questions; without one, the seed step drafts
+gen_v1.py from the analysis first (chart_seed.py; an existing data file is never touched).
 
 Interpreters: $MWS_<ROLE>_PY, else ~/.config/music-workflow-skills/env.json, roles
 analysis, demucs, lvchordia, whisper, adtof (the venvs of references/environment-setup.md;
@@ -34,7 +35,7 @@ Usage (python3, standard library only):
     run.py answer <song> [--cycle 4 --grouping 2,2 --decided-by player ...] [--clear KEY]
     run.py doctor
 Steps: pulse, stems, stems_6s, sweep, meter, bass, lyrics, lyrics_mix, align, mode,
-chords, chords_lv, tab, drums, strum, activity, validate, chart.
+chords, chords_lv, tab, drums, strum, activity, validate, seed, chart.
 Exit: 0 done, 1 a step failed, 2 stopped at a question, 3 environment (an interpreter,
 ffmpeg or the audio missing).
 """
@@ -160,6 +161,7 @@ def load_env() -> dict:
         out[role] = str(Path(p).expanduser()) if p else None
     out['py'] = sys.executable
     out['ffmpeg'] = os.environ.get('MWS_FFMPEG') or conf.get('ffmpeg') or shutil.which('ffmpeg')
+    out['demucs_device'] = os.environ.get('MWS_DEMUCS_DEVICE') or conf.get('demucs_device')
     return out
 
 
@@ -434,6 +436,13 @@ def steps() -> list[Step]:
              lambda c: [],
              lambda c: [[c.env['py'], S('validate_artifacts.py'), 'analysis']],
              scripts=('validate_artifacts.py',), optional=('align',)),
+        Step('seed', 'py', 'cpu', ('validate',),
+             lambda c: [(c.song / 'gen_v1.py', ())],       # gone again: seed again
+             lambda c: [],
+             lambda c: [[c.env['py'], S('chart_seed.py'), str(c.song)]],
+             skip=lambda c: ('a chart data file exists (never overwritten)' if chart_file(c)
+                             else None),
+             scripts=('chart_seed.py',), optional=('align', 'mode')),
         Step('chart', 'py', 'cpu', ('validate', 'activity'),
              lambda c: [(chart_file(c), ()),
                         (A(c, 'foundation.json'), METER + ('decided_by', 'to_confirm',
@@ -446,9 +455,10 @@ def steps() -> list[Step]:
              lambda c: [[c.env['py'], S('chart_html.py'), chart_file(c).name],
                         [c.env['py'], S('chart_questions.py'), chart_file(c).name]],
              skip=lambda c: (None if chart_file(c) else
-                             'no gen_v1.py yet: write the chart data file '
-                             '(Phase 8, references/chart-and-lyrics.md), then run again'),
-             scripts=('chart_html.py', 'chart_questions.py'), optional=('align', 'mode', 'tab')),
+                             'no gen_v1.py yet: run.py seeds one (chart_seed.py) once the '
+                             'analysis is done'),
+             scripts=('chart_html.py', 'chart_questions.py'),
+             optional=('align', 'mode', 'tab', 'seed')),
     ]
 
 
@@ -601,9 +611,10 @@ def run(c: Ctx, table: dict, targets: list, redo: set = frozenset()) -> int:
     deps = lambda n: [d for d in table[n].needs + table[n].optional if d in status]
     moving = ('todo', 'stale', 'wait', 'running')
     for n in targets:                                     # table order is dependency order
-        if status[n] in ('done', 'stale') and n not in redo and \
+        if status[n] in ('done', 'stale', 'skip') and n not in redo and \
                 any(status[d] in moving for d in deps(n)):
             status[n] = 'wait'                            # judged once upstream has run
+            #                                     (the chart waits for its seeded data file)
     for n in targets:
         if status[n] == 'skip':
             c.log(f'-- {n}: skipped ({table[n].skip(c)})')

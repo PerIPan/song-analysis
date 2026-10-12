@@ -251,6 +251,15 @@ r = cli('run', str(c.song), '--until', 'pulse')
 check('a missing interpreter stops the run before anything starts: exit 3',
       r.returncode == 3 and 'no interpreter for analysis' in r.stdout, r.stdout + r.stderr[-300:])
 
+c = song()                             # a step skipped at the start is looked at again
+G = step('g', code=log_line('g', "P('gen.txt').write_text('1')"), writes=['g.json'])
+H = R.Step('h', 'py', 'cpu', (), lambda c: [], lambda c: [], lambda c: [py(log_line('h'))],
+           skip=lambda c: None if (c.song / 'gen.txt').exists() else 'no gen.txt yet',
+           optional=('g',))
+R.run(c, {'g': G, 'h': H}, ['g', 'h'])
+check('a step skipped for a file its upstream makes runs once that file is there',
+      [n for n, *_ in order(c)] == ['g', 'h'], order(c))
+
 # ---------------------------------------------------------------- until, adoption
 table = {s.name: s for s in R.steps()}
 check('--until meter: meter and what it needs, in order',
@@ -265,7 +274,7 @@ check('meter is to do while foundation.json has no downbeats',
 # ---------------------------------------------------------------- the real commands
 c = song()
 c.env.update(analysis='/venv/py', demucs='/venv/dm', ffmpeg='ffmpeg', whisper='/venv/w',
-             lvchordia='/venv/lv')
+             lvchordia='/venv/lv', demucs_device='mps')       # the same on any CI runner
 c.answers.update(cycle=11, grouping='6,5', pulse_unit=8, use_alternative=True,
                  decided_by='player', bass_entry_bar=5, language='el')
 m = table['meter'].argv(c)[0]
@@ -274,18 +283,27 @@ check('meter: the answers as foundation.py flags, --decided-by player',
                  '--decided-by', 'player'], m)
 check('bass: --bass-entry-bar from the answers',
       table['bass'].argv(c)[0][-2:] == ['--bass-entry-bar', '5'], table['bass'].argv(c))
+os.environ['MWS_DEMUCS_DEVICE'] = 'cpu'
+check('$MWS_DEMUCS_DEVICE reaches the demucs command', R.device(R.load_env()) == ['-d', 'cpu'])
+del os.environ['MWS_DEMUCS_DEVICE']
+check('demucs -d: env.json demucs_device, else mps only on Apple Silicon',
+      R.device({'demucs_device': 'cuda'}) == ['-d', 'cuda']
+      and R.device({}) == (['-d', 'mps'] if sys.platform == 'darwin' and R.platform.machine() == 'arm64'
+                           else []), R.device({}))
 d = table['stems'].argv(c)
 check('stems: decoded to <slug>.wav, then demucs htdemucs_ft on mps into stems/',
       d[0][0] == 'ffmpeg' and d[0][-1].endswith('take.wav') and d[1][:6] ==
       ['/venv/dm', '-m', 'demucs', '-n', 'htdemucs_ft', '-d'] and d[1][-2] == str(c.song / 'stems'), d)
 check('lyrics: --language from the answers', table['lyrics'].argv(c)[0][-2:] == ['--language', 'el'])
 check('no lyrics.txt: lyrics_mix and align skip', table['lyrics_mix'].skip(c) and table['align'].skip(c))
-check('no gen_v<N>.py: the chart step says to write it',
-      'write the chart data file' in (table['chart'].skip(c) or ''))
+check('no gen_v<N>.py: the chart step waits for the seed, which runs',
+      'seeds one' in (table['chart'].skip(c) or '') and table['seed'].skip(c) is None
+      and 'seed' in table['chart'].optional)
 for n in ('gen_v2.py', 'gen_v10.py'):
     (c.song / n).write_text('SONG = {}')
-check('the chart step renders the newest gen_v<N>.py (10 after 2)',
-      table['chart'].argv(c)[0][-1] == 'gen_v10.py', table['chart'].argv(c))
+check('the chart step renders the newest gen_v<N>.py (10 after 2); the seed never runs then',
+      table['chart'].argv(c)[0][-1] == 'gen_v10.py' and 'never overwritten'
+      in (table['seed'].skip(c) or ''), table['chart'].argv(c))
 c.answers['no_6s'] = True
 check('no_6s: the 6-stem split and the strums skip', table['stems_6s'].skip(c)
       and table['strum'].skip(c))

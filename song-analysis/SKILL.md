@@ -66,7 +66,7 @@ also a script you can run by hand: `references/phases.md`.
 | 5 Lyrics | `lyrics`, `lyrics_mix` | `whisper_gated.py` (gated by the vocal stem) | `lyrics.json`, `lyrics_mix.json` |
 | 6 Sections | `align` | `align_lyrics.py` (canonical lyrics ↔ word times) | `lyrics_aligned.json`, `sections.json` |
 | 7 Chords | `chords`, `chords_lv`, `tab` | `chord_proposal.py`, `lv_chords.py`, `tab_compare.py` | `chord_proposal.json`, `chords_lv.json` |
-| 8 Chart | `activity`, `validate`, `chart` | `stem_activity.py`, `validate_artifacts.py`, `chart_html.py` + `chart_questions.py` | the HTML chart, the player's questions |
+| 8 Chart | `activity`, `validate`, `seed`, `chart` | `stem_activity.py`, `validate_artifacts.py`, `chart_seed.py` (a first `gen_v1.py`), `chart_html.py` + `chart_questions.py` | the HTML chart, the player's questions |
 
 **References (read on demand):** `references/phases.md` (Phases 1–7: what each step
 does, by-hand commands, traps) · `meter-detection.md` · `stems.md` · `chord-proposal.md`
@@ -105,11 +105,14 @@ does, by-hand commands, traps) · `meter-detection.md` · `stems.md` · `chord-p
 
 ## Phase 8 — the chart
 
-The chart is rendered: you write the decisions as a `SONG` dict in `gen_v<N>.py` in the
-song folder (a new N per revision) — sections, a chord per `(bar, cell)` (lead-sheet
-symbols, or `chords_lv.json`'s labels, converted), each lyric line at its anchor cell, the
-header, provenance and commentary — and `run.py` (or `python3 scripts/chart_html.py
-gen_v1.py`) renders it, reading everything measured from `analysis/`. It refuses evidence
+The chart is rendered from a `SONG` dict in `gen_v<N>.py` in the song folder (a new N per
+revision). `run.py` drafts `gen_v1.py` when there is none (`scripts/chart_seed.py`: the
+chords per `(bar, cell)` as literal labels, sections from lyrics.txt's labels with an Intro,
+Interludes and an Outro where the voice is out, each lyric line at its cell, the header,
+a provenance line saying no player has checked it, the open questions; it never touches an
+existing data file). You then check and name the sections, fix what the evidence says,
+write the commentary (`notes`) and finish the provenance; `run.py` (or `python3
+scripts/chart_html.py gen_v1.py`) renders it, reading everything measured from `analysis/`. It refuses evidence
 made on another grid (re-run it; `--allow-stale` renders anyway) and checks the player's
 `corrections` on every render. Read `references/chart-and-lyrics.md` first. Invariants:
 - Each section starts a new row; parallel sections get identical row splits. Chart bar =

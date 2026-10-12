@@ -176,7 +176,9 @@ working warp markers), shipped as a `git apply` patch —
 the GPU lane (stems, Whisper) beside the CPU lane, steps whose inputs haven't changed
 skipped, stopping at the first question with the answer that settles it — so a run resumes
 after a pause and a beat-1 fix re-runs ~30 s, not the evening (`run.py status` shows what is
-done, stale or waiting). On one song, the WAV to every analysis file took 2:45.
+done, stale or waiting). On one song, the WAV to every analysis file took 2:45, and it ends
+with a draft chart: `chart_seed.py` writes the first data file (chords, sections, lyric
+lines, header, open questions) for Claude and the player to check.
 `validate_artifacts.py` checks the hand-offs between phases (grid, coverage, a moved beat 1);
 `publish_chart.py` writes the band's HTML + PDF (WiP or OK) once the player says it's ready;
 `ableton-mcp/scripts/push_notes.py` pushes notes into Live over its TCP socket.

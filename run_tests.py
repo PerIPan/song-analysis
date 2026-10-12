@@ -33,6 +33,7 @@ TESTS = [  # (test file, interpreter role)
     ('song-analysis/tests/test_publish_chart.py', 'std'),
     ('song-analysis/tests/test_chart_export.py', 'std'),
     ('song-analysis/tests/test_chart_player.py', 'std'),
+    ('song-analysis/tests/test_chart_seed.py', 'std'),
     ('ableton-mcp/tests/test_push_notes.py', 'std'),
     ('ableton-song-remix/tests/test_chordsym.py', 'std'),
     ('ableton-song-remix/tests/test_remix_plan.py', 'std'),
