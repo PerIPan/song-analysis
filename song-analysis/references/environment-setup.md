@@ -120,7 +120,11 @@ cloud-storage folder).
 
 ## This machine
 
-The one place for local paths — every skill in this repo points here.
+The one place for local paths — every skill in this repo points here. `scripts/run.py` and
+`run_tests.py` read the interpreters from `~/.config/music-workflow-skills/env.json`
+(`{"analysis": ".../.venv-bp/bin/python", "demucs": ...}`, roles analysis, demucs,
+lvchordia, whisper, adtof; `"publish_to"` for `publish_chart.py`) — `run.py doctor` checks
+them, ffmpeg and the model caches, and prints a template.
 
 | Role | Interpreter / binary |
 |---|---|

@@ -98,6 +98,8 @@ F3 = dict(downbeat_times=[1.0 + 2 * i for i in range(9)], grouping=[2, 2], time_
 mq = meter_question(F3) or ''
 check("a meter Claude chose: asked first, with beat 1's time", "Claude's call" in mq
       and '0:01' in mq and '--decided-by player' in mq, mq)
+mq2 = meter_question({k: v for k, v in F3.items() if k != 'decided_by'} | dict(to_confirm=['downbeat'])) or ''
+check('a beat 1 measured at LOW confidence is asked too', 'LOW confidence' in mq2, mq2)
 check("...the player's or a measured meter: not asked",
       meter_question(dict(F3, decided_by=dict(who='player', what=['cycle']))) is None
       and meter_question({k: v for k, v in F3.items() if k != 'decided_by'}) is None)

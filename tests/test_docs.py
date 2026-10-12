@@ -6,7 +6,9 @@ Stale phrases are claims that were true once (Harte labels refused, the Master t
 reach, one meter per Set, raw lv-chordia chords sent to Live, flags recorded as 'user', a
 stale grid only warned about). The flag check reads each command line in SKILL.md and
 references/*.md that names scripts/<name>.py (with its backslash continuations) and looks
-for every --flag in that script's source.
+for every --flag in that script's source. A SKILL.md over the size budget fails too: after
+compaction Claude Code re-attaches only a skill's first 5,000 tokens, so the rules at the
+top must fit.
 Run: python3 tests/test_docs.py   (standard library only)
 """
 import re, sys
@@ -24,6 +26,7 @@ STALE = [  # (pattern, why it is wrong now)
     (r"recorded as `user`", "foundation.py records agent or player (--decided-by)"),
     (r"another grid is warned about", "chart_html refuses evidence from another grid"),
 ]
+SKILL_BUDGET = 20_000      # bytes (~5k tokens at 4 bytes a token)
 
 
 def commands(text: str):
@@ -59,10 +62,20 @@ def main():
             src = SCRIPTS[name].read_text()
             for flag in re.findall(r'(?<![\w-])(--[a-z][a-z0-9-]*)', cmd):
                 seen += 1
-                if f'"{flag}"' not in src and f"'{flag}'" not in src:
+                key = flag[2:].replace('-', '_')        # run.py builds its answer flags
+                if f'"{flag}"' not in src and f"'{flag}'" not in src and f"'{key}': (" not in src:
                     missing.append(f'{d.relative_to(ROOT)}: {name} {flag}')
     check(f'every documented script flag exists ({seen} checked)', seen > 30 and not missing,
           missing)
+    for skill in sorted(ROOT.glob('*/SKILL.md')):
+        size = len(skill.read_bytes())
+        check(f'{skill.parent.name}/SKILL.md within {SKILL_BUDGET:,} bytes ({size:,})',
+              size <= SKILL_BUDGET, size)
+    refs = {d.name for d in DOCS}
+    dead = [f'{d.relative_to(ROOT)}: {m}' for d in DOCS
+            for m in re.findall(r'`(?:references/)?([a-z-]+\.md)`', d.read_text())
+            if m not in refs and m not in ('SKILL.md', 'README.md', 'COMPARISON.md')]
+    check('every referenced .md exists', not dead, dead)
     sys.exit(1 if fails else 0)
 
 

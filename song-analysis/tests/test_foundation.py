@@ -63,6 +63,14 @@ def main():
           (F and F["provenance"], r.stdout))
     r, F = run(d, dict(cycle=4, grouping=[2, 2], downbeat_pulse=1))
     check("all measured: no decided_by", F and "decided_by" not in F, F and F.get("decided_by"))
+    check("...nor to_confirm when the sweep is sure", "to_confirm" not in F, F.get("to_confirm"))
+    r, F = run(d, dict(cycle=4, grouping=[2, 2], downbeat_pulse=1, confidence="LOW",
+                       margin=1.4, anchor_band="bass"))
+    check("LOW confidence: kept, listed to confirm, said", F and F["to_confirm"] == ["cycle", "downbeat"]
+          and "LOW confidence" in r.stdout and "bass band" in r.stdout, (F and F.get("to_confirm"), r.stdout))
+    r, F = run(d, dict(cycle=4, grouping=[2, 2], downbeat_pulse=1, confidence="LOW"),
+               "--downbeat-pulse", 1, "--decided-by", "player")
+    check("...the player's beat 1: nothing left to confirm", F and "to_confirm" not in F, F)
     sys.exit(1 if fails else 0)
 
 

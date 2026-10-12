@@ -29,6 +29,8 @@ TESTS = [  # (test file, interpreter role)
     ('song-analysis/tests/test_chart_questions.py', 'std'),
     ('song-analysis/tests/test_fetch_audio.py', 'std'),
     ('song-analysis/tests/test_validate_artifacts.py', 'std'),
+    ('song-analysis/tests/test_run.py', 'std'),
+    ('song-analysis/tests/test_publish_chart.py', 'std'),
     ('ableton-mcp/tests/test_push_notes.py', 'std'),
     ('ableton-song-remix/tests/test_chordsym.py', 'std'),
     ('ableton-song-remix/tests/test_remix_plan.py', 'std'),

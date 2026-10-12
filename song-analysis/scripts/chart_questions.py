@@ -143,17 +143,22 @@ def parallel_breaks(S: dict, a: Path, skip: set = frozenset()) -> list[dict]:
 
 def meter_question(F: dict) -> str | None:
     """The meter and beat 1 to confirm first when Claude chose them (foundation.py meter
-    without --decided-by player): every bar-keyed answer depends on them."""
+    without --decided-by player) or the sweep measured them at LOW confidence (to_confirm):
+    every bar-keyed answer depends on them."""
     d = F.get('decided_by') or {}
-    if d.get('who') != 'agent' or not F.get('downbeat_times'):
+    agent = d.get('what', []) if d.get('who') == 'agent' else []
+    weak = F.get('to_confirm') or []
+    if not (agent or weak) or not F.get('downbeat_times'):
         return None
     sig = F.get('time_signature', '?')
     grp = '+'.join(map(str, F.get('grouping', [])))
     t = F['downbeat_times'][0]
-    return (f"meter check: {sig} as {grp}, beat 1 at {mmss(t)} ({t:.2f} s) - "
-            f"{', '.join(d.get('what', []))} were Claude's call. Ask the player to count along "
-            f"from bar 1 first; once confirmed, re-run foundation.py meter with the same flags "
-            f"and --decided-by player")
+    why = '; '.join(x for x in (agent and f"{', '.join(agent)} were Claude's call",
+                                weak and f"{' and '.join(weak)} measured at LOW confidence") if x)
+    return (f"meter check: {sig} as {grp}, beat 1 at {mmss(t)} ({t:.2f} s) - {why}. Ask the "
+            f"player to count along from bar 1 first; once confirmed, re-run foundation.py "
+            f"meter with the flags that say so (--downbeat-pulse K if beat 1 moves) and "
+            f"--decided-by player")
 
 
 def timer(F: dict, S: dict):

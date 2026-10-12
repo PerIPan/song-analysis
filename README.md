@@ -153,7 +153,13 @@ working warp markers), shipped as a `git apply` patch —
 | 7 Chords | `lv_chords.py` + `chord_proposal.py` | chords with 7ths/inversions, cross-checked per cell |
 | 8 Chart | `stem_activity.py` → `chart_html.py` (renders a per-song data file Claude writes) | self-contained HTML chart: chords + lyrics, song map, commentary |
 
-`validate_artifacts.py` checks the hand-offs between phases;
+`run.py` runs Phases 1–8 on a song folder in one command: each step with its interpreter,
+the GPU lane (stems, Whisper) beside the CPU lane, steps whose inputs haven't changed
+skipped, stopping at the first question with the answer that settles it — so a run resumes
+after a pause and a beat-1 fix re-runs ~30 s, not the evening (`run.py status` shows what is
+done, stale or waiting). On one song, the WAV to every analysis file took 2:45.
+`validate_artifacts.py` checks the hand-offs between phases (grid, coverage, a moved beat 1);
+`publish_chart.py` writes the band's HTML + PDF (WiP or OK) once the player says it's ready;
 `ableton-mcp/scripts/push_notes.py` pushes notes into Live over its TCP socket.
 
 ## Measured

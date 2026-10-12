@@ -18,7 +18,9 @@ with "NEEDS A DECISION: ..." on stderr; 1 is an error.
 
 Who chose what the flags set is recorded: --decided-by player when the player counted
 or confirmed it, agent (the default) when Claude chose - the provenance then says so,
-and chart_questions.py asks the player to confirm the meter and beat 1 first.
+and chart_questions.py asks the player to confirm the meter and beat 1 first. A meter
+measured at LOW confidence is kept but listed under to_confirm for the same question: on
+one song two stem separations moved beat 1 by three pulses (snare band, then bass band).
 
 Run with the analysis venv (madmom + numpy; the meter step needs only numpy).
 """
@@ -174,6 +176,11 @@ def cmd_meter(a):
     F.pop("decided_by", None)
     if chosen:
         F["decided_by"] = dict(who=who, what=chosen)
+    weak = cons is not None and cons.get("confidence") == "LOW" and who != "player"
+    confirm = [k for k in ("cycle", "downbeat") if weak and prov[k].startswith("measured")]
+    F.pop("to_confirm", None)
+    if confirm:
+        F["to_confirm"] = confirm
     F.update(provenance=prov, beats_per_bar=cycle, pulse_unit=unit, time_signature=f"{cycle}/{unit}",
              grouping=grouping, downbeat_pulse=dp, pickup_pulses=dp,
              downbeat_times=downbeats, num_bars=len(downbeats) - 1, bar_bpm=bar_bpm,
@@ -195,6 +202,10 @@ def cmd_meter(a):
         print(f"  {', '.join(chosen)}: Claude's call, not the player's - say so, and ask the "
               f"player to count along before the chart goes to the band "
               f"(re-run with --decided-by player once they confirm)")
+    if confirm:
+        print(f"  {' and '.join(confirm)} measured at LOW confidence "
+              f"({cons.get('anchor_band', '?')} band, {cons.get('margin', '?')}x): kept - ask "
+              f"the player to count along (chart_questions.py asks first)")
 
 
 def main():
