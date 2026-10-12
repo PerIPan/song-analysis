@@ -122,6 +122,25 @@ It needs the optional yt-dlp venv ([setup](song-analysis/references/environment-
 Fetch only recordings you have the right to study: YouTube's Terms restrict downloading.
 No logins; nothing is uploaded.
 
+## For the band: their apps, their key, a play-along check
+
+The chart is the listening and checking view, bar by bar. From the same data file — so a
+player's fixes carry over:
+
+- **`chart_export.py`** writes a **ChordPro** file (OnSong, SongbookPro and other ChordPro
+  apps: lyrics with their chords inline), an **iReal Pro** import (a tap-to-import link:
+  chords and form, repeats folded; a meter iReal can't show, like 11/8, is refused rather
+  than flattened) and a **gig sheet** (each section's pattern once with ×N and the bars
+  that differ — a 116-bar song on one printed page). `--transpose -2` / `--capo 3` move them
+  to the band's key or capo shapes.
+- **`chart_player.py`** writes a play-along page: the recording under the chart, the cell
+  sounding now lit, click to play from a bar before, loop a section, slow down to 50%
+  without changing pitch, and type fixes against the cell they belong to — collected into
+  one list to copy back. A local tool (it links the recording); the printed chart is
+  unchanged.
+- **`publish_chart.py`** puts the chart's HTML and PDF in the band's folder, named their way
+  with WiP or OK, after a yes.
+
 ## Optional: Ableton Live
 
 Not needed for the chart. If you use Live, `song-to-ableton` rebuilds the analysed song in
@@ -201,7 +220,7 @@ git config core.hooksPath .githooks   # once: the fast tests before every commit
 
 `tests/test_docs.py` keeps the skills' docs honest: every flag a doc shows for a script
 exists in it, and claims that went stale stay gone. Charts keep their player's fixes:
-`chart_html.py */gen_v1.py --check` exits 1 when a recorded correction no longer holds.
+`chart_html.py <songs root>/*/ --check` exits 1 when a recorded correction no longer holds.
 
 ## Layout
 

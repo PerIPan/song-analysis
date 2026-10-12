@@ -84,7 +84,8 @@ does, by-hand commands, traps) · `meter-detection.md` · `stems.md` · `chord-p
   two accents for beat 1, eighth or quarter pulse) or a `DOWNBEAT CHECK`. Put it as printed;
   `run.py answer` with the user's words.
 - **C. The player check** (Phase 8, below): up to four cells a round, by ear.
-- **D. Publish and what next:** the band's folder (a yes, WiP or OK), then the Live offer.
+- **D. Publish and what next:** the band's folder (a yes, WiP or OK), the band's apps or key
+  (exports, transposition), the play-along page, then the Live offer.
 
 ## Inputs
 
@@ -153,6 +154,20 @@ band's way (`3.3 Artist - Title - chords - <key> WiP|OK`, HTML + A4 PDF via head
 Chrome, page count reported) and prints what it would write; ask the user, then add `--yes`.
 The folder: `--to`, or `publish_to` in `~/.config/music-workflow-skills/env.json`
 (`{artist}` in it). WiP until the band has played it; OK replaces the WiP copy.
+
+**The band's apps, their key, a play-along check (options — offer them).**
+`python3 scripts/chart_export.py gen_v1.py` writes a ChordPro file (`.cho`: OnSong and other
+ChordPro apps), an iReal Pro import page (chords and form, repeats folded; a meter iReal has
+no symbol for, like 11/8, is refused, never flattened; iReal shows 12 lines — a longer form
+is warned about) and a gig sheet (each section's pattern once with ×N and the bars that
+differ: one or two printed pages). `--transpose N` / `--capo N` move all three to the
+band's key or capo shapes; the data file's `transpose` / `capo` keys do the same for the
+chart itself (`chart_html.py --transpose -2`, `publish_chart.py --transpose -2`: "key of …").
+`python3 scripts/chart_player.py gen_v1.py` writes a play-along page beside the recording:
+the cell sounding now lit, click to play from a bar before, L loops the section, 50–100%
+speed at the same pitch, and fixes typed against their cell, copied back in one message —
+apply them as data (above). It links the recording: a local tool, never for the shared
+folder.
 
 **What next (Live optional).** Only if the Live skills are installed and
 `mcp__ableton__health_check` answers, ask once: a **sketch in Live** (the vocal on Live's

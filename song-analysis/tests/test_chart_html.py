@@ -608,6 +608,27 @@ def main():
           and "gen_v1.py: no corrections" in r.stdout, r.stdout + r.stderr)
     r = run(str(d / "fix.py"), str(d / "broke.py"), "--out", "two.html")
     check("CLI: --out with two data files refused", r.returncode == 2, r.stderr)
+    (d / "tr.py").write_text(
+        "SONG = dict(title='Tr', artist='Nobody', key_short='E minor', transpose=-2,\n"
+        "            chords={(1, 1): 'Em', (1, 2): 'B7', (2, 1): 'C/E'},\n"
+        "            sections=[('Verse', 1, 2, 'verse', '')])\n", encoding="utf-8")
+    r = run(str(d / "tr.py"))
+    trd = d / "Nobody - Tr - Chords (in D minor).html"
+    doc_t = trd.read_text(encoding="utf-8") if trd.exists() else ""
+    labels = [c[2] for c in CELL.findall(doc_t)][:3]
+    check("transpose -2: printed in D minor, slash bass moved, the title and file say so",
+          r.returncode == 0 and labels[:2] == ["Dm", "A7"] and "(D)" in labels[2]
+          and "in D minor (orig. E minor, -2)" in doc_t and "Tr · D minor" in doc_t,
+          (r.stderr, labels))
+    r = run(str(d / "tr.py"), "--transpose", "0", "--capo", "2", "--out", "capo.html")
+    doc_c = (cwd / "capo.html").read_text(encoding="utf-8") if (cwd / "capo.html").exists() else ""
+    check("--capo 2 on the command line: shapes two semitones down (Em -> Dm), said",
+          r.returncode == 0 and [c[2] for c in CELL.findall(doc_c)][:1] == ["Dm"]
+          and "capo 2" in doc_c, r.stderr)
+    (d / "trbad.py").write_text((d / "tr.py").read_text().replace("transpose=-2", "transpose=14"))
+    r = run(str(d / "trbad.py"))
+    check("transpose out of range refused", r.returncode == 1 and "'transpose'" in r.stderr,
+          r.stderr)
     (d / "analysis" / "bass_per_cell.json").write_text('{"cells": [{"bar": 1}]}',
                                                         encoding="utf-8")
     r = run(str(d / "gen_v1.py"))

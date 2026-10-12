@@ -25,7 +25,7 @@ template with {artist}, e.g. "~/Dropbox/Public/Band/{artist}". The PDF needs Chr
 
 Usage (python3, standard library only):
     publish_chart.py <song>/gen_v1.py [--to DIR] [--status WiP|OK] [--prefix 3.3] [--yes]
-        [--html-only]
+        [--html-only] [--transpose -2] [--capo 3]
     publish_chart.py --rerender ~/dev/songs [--yes]
 """
 from __future__ import annotations
@@ -52,9 +52,14 @@ def chrome() -> str | None:
          if shutil.which(n)), None)
 
 
-def base_name(S: dict, status: str, prefix: str | None) -> str:
-    """'3.3 Artist - Title - chords - E minor WiP' (no / \\ : in it)."""
+def base_name(S: dict, status: str, prefix: str | None, moved: str = '') -> str:
+    """'3.3 Artist - Title - chords - E minor WiP', transposed '... - chords - key of D
+    minor, capo 3 WiP' (no / \\ : in it)."""
     key = f" - {S['key_short']}" if S.get('key_short') else ''
+    if moved:
+        new = moved.split(' (')[0].replace('in ', 'key of ', 1) if moved.startswith('in ') else ''
+        capo = re.search(r'capo \d+', moved)
+        key = ' - ' + ', '.join(x for x in (new, capo and capo.group(0)) if x)
     name = f"{S['artist']} - {S['title']} - chords{key} {status}"
     return re.sub(r'[\\/:]', '-', f'{prefix} {name}' if prefix else name)
 
@@ -83,8 +88,8 @@ def destination(S: dict, to: str | None) -> Path | None:
 
 
 def publish(data: str, to: str | None, status: str, prefix: str | None, yes: bool,
-            html_only: bool = False) -> int:
-    S = load_song(data)
+            html_only: bool = False, over: dict | None = None) -> int:
+    S = {**load_song(data), **(over or {})}
     doc, info = compose(S)
     report_corrections(info)
     if info['failed']:
@@ -94,8 +99,8 @@ def publish(data: str, to: str | None, status: str, prefix: str | None, yes: boo
     if dest is None:
         print(f'publish_chart: where to? pass --to, or set "publish_to" in {ENV_FILE}')
         return 2
-    base = base_name(S, status, prefix)
-    other = base_name(S, STATUSES[status == 'WiP'], prefix)
+    base = base_name(S, status, prefix, info['moved'])
+    other = base_name(S, STATUSES[status == 'WiP'], prefix, info['moved'])
     files = [dest / f'{base}.html', dest / f'{base}.pdf']
     old = [p for ext in ('.html', '.pdf') for p in [dest / f'{other}{ext}'] if p.exists()]
     if info['n_q']:
@@ -163,6 +168,8 @@ def main() -> None:
     ap.add_argument('--prefix', help="the set slot, e.g. '3.3'")
     ap.add_argument('--yes', action='store_true', help='write (the user said yes)')
     ap.add_argument('--html-only', action='store_true', help='no PDF (no Chrome here)')
+    ap.add_argument('--transpose', type=int, help="semitones: the band's key")
+    ap.add_argument('--capo', type=int, help='chord shapes for a capo at this fret')
     ap.add_argument('--rerender', metavar='ROOT', help='re-render every song folder under ROOT')
     a = ap.parse_args()
     sys.dont_write_bytecode = True
@@ -170,7 +177,9 @@ def main() -> None:
         ap.error('give a data file or --rerender ROOT')
     try:
         sys.exit(rerender(a.rerender, a.yes) if a.rerender else
-                 publish(a.data, a.to, a.status, a.prefix, a.yes, a.html_only))
+                 publish(a.data, a.to, a.status, a.prefix, a.yes, a.html_only,
+                         {k: v for k, v in (('transpose', a.transpose), ('capo', a.capo))
+                          if v is not None}))
     except (OSError, ValueError) as e:
         sys.exit(f'publish_chart: {e}')
 

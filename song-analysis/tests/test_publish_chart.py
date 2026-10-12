@@ -97,6 +97,10 @@ r = subprocess.run([sys.executable, str(SCRIPT), str(song / 'gen_v1.py'), '--to'
                    env=dict(env, MWS_CHROME=str(bad)))
 check('--html-only: the page alone', r.returncode == 0 and sorted(
       p.suffix for p in (TMP / 'ho').iterdir()) == ['.html'], r.stdout + r.stderr)
+r = run(song / 'gen_v1.py', '--to', TMP / 'tr', '--transpose', '-2', '--capo', '3')
+check("transposed: named 'key of G minor, capo 3' the band's way",
+      '3.3' not in r.stdout and 'Nobody - Paper Lanterns - chords - key of G minor, capo 3 WiP.pdf'
+      in r.stdout, r.stdout + r.stderr)
 r = run('--rerender', songs)
 check('--rerender: a chart never rendered is listed as changed, not written', r.returncode == 0
       and 'CHANGED one' in r.stdout and not (song / 'Nobody - Paper Lanterns - Chords.html').exists(),

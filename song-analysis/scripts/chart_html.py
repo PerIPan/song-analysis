@@ -87,6 +87,9 @@ unknown kind is refused with the reason.
                     'anchor': words sung before a line's anchor are pulled into it
     verified        [(bar, cell), ...] a player confirmed (JSON-style [bar, cell] lists do
                     too): no "?" or split mark there (say who checked in provenance)
+    transpose       semitones, -11..11: the chords printed in the band's key (the "?" marks
+                    and the corrections stay on the recording's key); the title says so
+    capo            fret 0..12: the chords printed as shapes for a capo there
     corrections     [(bar, cell, kind, value[, source[, date]])] what a player corrected,
                     checked on every render (a warning when one no longer holds; --check
                     exits 1): kind 'chord' (the cell's chord is value) or 'word' (the
@@ -181,6 +184,65 @@ def split_slash(label: str) -> tuple[str, str | None]:
     ('C6/9' -> ('C6/9', None))."""
     m = re.fullmatch(r'(.+)/([A-G][#b]?)', label)
     return (m.group(1), m.group(2)) if m else (label, None)
+
+
+KEY_RE = re.compile(r'\s*([A-G])\s*([#b♯♭]?)\s*(minor|min|m(?![a-z])|major|maj)?', re.I)
+
+
+def key_of(text: str | None) -> tuple[int, bool] | None:
+    """('E minor' | 'F♯' | 'Bb major' | 'C#m ...') -> (pitch class, minor); None if unreadable."""
+    m = KEY_RE.match(text or '')
+    if not m:
+        return None
+    acc = m.group(2).replace('♯', '#').replace('♭', 'b')
+    minor = bool(m.group(3)) and m.group(3).lower() in ('minor', 'min', 'm')
+    return PC[m.group(1).upper() + acc], minor
+
+
+def spelling(key: tuple[int, bool] | None) -> list[str]:
+    """Sharp names in sharp keys (by the major key of the signature), flats otherwise."""
+    if key is None:
+        return FLAT
+    major = (key[0] + 3) % 12 if key[1] else key[0]
+    return SHARP if major in (7, 2, 9, 4, 11, 6, 1) else FLAT
+
+
+def move(label: str, n: int, names: list[str]) -> str:
+    """A lead-sheet chord n semitones up, root and slash bass spelt from names."""
+    if n == 0 or not label or label.startswith('N'):
+        return label
+    chord, bass = split_slash(label)
+    m = re.match(r'([A-G][#b]?)(.*)', chord)
+    if not m:
+        return label
+    out = names[(PC[m.group(1)] + n) % 12] + m.group(2)
+    return f"{out}/{names[(PC[bass] + n) % 12]}" if bass else out
+
+
+def key_name(key: tuple[int, bool], names: list[str]) -> str:
+    return names[key[0]] + (' minor' if key[1] else ' major')
+
+
+def transposed(S: dict, transpose: int, capo: int) -> tuple[dict, str]:
+    """SONG with chords (and bass notes) moved by transpose - capo, spelt from the key it
+    lands in; a note saying so ('in D minor (orig. E minor, -2), capo 3: shapes -3')."""
+    shift = transpose - capo
+    k0 = key_of(S.get('key_short'))
+    sounding = ((k0[0] + transpose) % 12, k0[1]) if k0 else None
+    names = spelling(((sounding[0] - capo) % 12, sounding[1]) if sounding else None)
+    S = dict(S, chords={k: move(v, shift, names) for k, v in S['chords'].items()},
+             bass_notes={k: move(v, shift, names) for k, v in S.get('bass_notes', {}).items()})
+    if not (transpose or capo):
+        return S, ''
+    snames = spelling(sounding)
+    parts = []
+    if transpose:
+        parts.append(f"in {key_name(sounding, snames)}" if sounding else f'{transpose:+d} semitones')
+        if k0:
+            parts[-1] += f" (orig. {key_name(k0, spelling(k0))}, {transpose:+d})"
+    if capo:
+        parts.append(f'capo {capo}: shapes {-capo:+d}')
+    return S, ', '.join(parts)
 
 
 def pretty(s: str) -> str:
@@ -656,7 +718,8 @@ SPLIT_CSS = ('.half.split .chord{text-decoration:underline dashed #b58632;'
 ADLIB_CSS = '.lyric .adlib{color:#aaa;margin-left:.45em}'
 KEYS = {'title', 'artist', 'sections', 'chords', 'folder', 'out', 'key_short', 'lyrics',
         'words', 'bass_notes', 'verified', 'placement', 'stops', 'repeat_sections', 'grouping', 'bars_per_row', 'duration_s', 'subline',
-        'facts', 'provenance', 'map_note', 'notes', 'method', 'corrections'}
+        'facts', 'provenance', 'map_note', 'notes', 'method', 'corrections', 'transpose',
+        'capo'}
 CORRECTION_KINDS = ('chord', 'word')
 KINDS = ('intro', 'verse', 'post', 'chorus', 'bridge', 'inst', 'outro')
 LYRIC_KINDS = ('', 'adlib', 'fixed', *(f'pk pk-{k}' for k in KINDS))
@@ -741,6 +804,10 @@ def check_song(S: dict) -> None:
         raise ValueError(f"'corrections' takes (bar, cell, kind, value[, source[, date]]) "
                          f"tuples, kind {' or '.join(map(repr, CORRECTION_KINDS))} and text "
                          f'after it: {short(bad[0])}')
+    for name, lo, hi in (('transpose', -11, 11), ('capo', 0, 12)):
+        v = S.get(name, 0)
+        if not (whole(v) and lo <= v <= hi):
+            raise ValueError(f"'{name}' must be a whole number {lo}..{hi}; got {short(v)}")
     v = S.get('bars_per_row', 1)
     if not (whole(v) and v >= 1):
         raise ValueError(f"'bars_per_row' must be a whole number of bars, 1 or more; got "
@@ -915,6 +982,7 @@ def compose(S: dict, allow_stale: bool = False) -> tuple[str, dict]:
     #                                     to read; the chart keeps the loop
     flagged, split = flags(S, lv, tri, bass) - quiet, splits(S, lv) - quiet
     lyr, over = distribute(S, grid, words)
+    D, moved = transposed(S, S.get('transpose', 0), S.get('capo', 0))   # printed chords only
     st = stats(S, lv, tri)
     per_row = S.get('bars_per_row') or max(1, 8 // grid.n)
     grid_rules, shade = grid_css(grouping, per_row)
@@ -930,11 +998,15 @@ def compose(S: dict, allow_stale: bool = False) -> tuple[str, dict]:
     css = (CSS.replace('@GRID@\n', grid_rules).replace('@SHADE@\n', shade)
            .replace('@EXTRA@\n', ''.join(r + '\n' for r in extra)))
 
-    key = f" · {esc(S['key_short'])}" if S.get('key_short') else ''
+    key = f" · {esc(S['key_short'])}" if S.get('key_short') and not moved else ''
+    if moved:
+        key = f" · {esc(moved[3:].split(' (')[0].split(', capo')[0])}" if moved.startswith('in ') else ''
     name = f"{esc(S['artist'])} — {esc(S['title'])}"
     hdr = ''.join(f'<div><div class="k">{esc(k)}</div><div class="v">{v}</div></div>'
                   for k, v in S.get('facts', []))
     top = ''.join(line + '\n' for line in (
+        moved and f'<div class="sub"><b>{esc(moved)}</b> · chord names in the notes are in '
+                  'the recording\'s key</div>',
         S.get('subline') and f"<div class=\"sub\">{S['subline']}</div>",
         hdr and f'<div class="hdr">{hdr}</div>',
         S.get('provenance') and f"<div class=\"prov\">{S['provenance']}</div>") if line)
@@ -977,7 +1049,7 @@ def compose(S: dict, allow_stale: bool = False) -> tuple[str, dict]:
 <style>{css}</style></head><body>
 <h1>{name}{key}</h1>
 {top}<div class="chart">
-{rows_html(S, grid.n, per_row, flagged, split, lyr, over, stops, grid.db)}
+{rows_html(D, grid.n, per_row, flagged, split, lyr, over, stops, grid.db)}
 </div>
 <section class="notes">
 <h2>Song map</h2>
@@ -993,9 +1065,10 @@ def compose(S: dict, allow_stale: bool = False) -> tuple[str, dict]:
 </section>
 </body></html>
 """
-    default = re.sub(r'[\\/:]', '-', f"{S['artist']} - {S['title']} - Chords.html")
+    tag = f" ({moved.split(' (')[0]})" if moved else ''
+    default = re.sub(r'[\\/:]', '-', f"{S['artist']} - {S['title']} - Chords{tag}.html")
     n_ly = len(set(lyr) | {k for k, (_, kind) in over.items() if kind == 'adlib'})
-    return doc, dict(stats=st, n_q=len(flagged), n_split=len(split), n_lyric=n_ly,
+    return doc, dict(stats=st, n_q=len(flagged), n_split=len(split), n_lyric=n_ly, moved=moved,
                      default_out=folder / S.get('out', default),
                      n_corrections=len(S.get('corrections', ())),
                      failed=correction_failures(S, lyr))
@@ -1028,23 +1101,26 @@ def main():
                     help="write nothing; exit 1 when a player correction no longer holds")
     ap.add_argument("--allow-stale", action="store_true",
                     help="render evidence made on another grid (with a warning)")
+    ap.add_argument("--transpose", type=int, help="semitones: print the chords in the band's key")
+    ap.add_argument("--capo", type=int, help="print the chords as shapes for a capo at this fret")
     a = ap.parse_args()
     if a.out and len(a.song) > 1:
         ap.error("--out takes one data file")
     sys.dont_write_bytecode = True                # no __pycache__ in the song folder
     songs = [newest(s) for s in a.song]
+    over = {k: v for k, v in (('transpose', a.transpose), ('capo', a.capo)) if v is not None}
     failed = errors = 0
     for song in songs:
         try:
             if song is None:
                 raise ValueError('no gen_v<N>.py in that folder')
             if a.check:
-                _, info = compose(load_song(song), a.allow_stale)
+                _, info = compose({**load_song(song), **over}, a.allow_stale)
                 print(f'{song}:', end=' ')
                 report_corrections(info) if info['n_corrections'] else print('no corrections')
                 failed += bool(info['failed'])
             else:
-                render(load_song(song), a.out, a.allow_stale)
+                render({**load_song(song), **over}, a.out, a.allow_stale)
         except Exception as e:     # a bad data file or analysis/: no traceback
             why = str(e) if isinstance(e, (OSError, ValueError)) else f'{type(e).__name__}: {e}'
             if not a.check:

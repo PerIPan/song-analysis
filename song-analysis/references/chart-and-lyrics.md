@@ -239,6 +239,15 @@ evidence through:
   hold`, a warning naming each one that no longer does); `chart_html.py --check` over all
   charted songs exits 1 when one breaks — run it before committing any renderer change.
 
+## Other views of the same data file
+
+- `chart_export.py` — ChordPro (lyrics with chords inline), an iReal Pro import (chords and
+  form; `chart_form.py` folds each section into its repeating pattern × N, exactly), a gig
+  sheet (the same folding allowing a bar or two to differ, listed). `--transpose`/`--capo`.
+- `chart_player.py` — the chart over the recording: lit cell, click-to-play a bar early,
+  section loops, slow-down, fixes noted per cell and copied back in one list.
+- `publish_chart.py` — HTML + PDF to the band's folder with WiP/OK, after a yes.
+
 ## HTML output — `scripts/chart_html.py`
 
 The chart is rendered, not hand-written. A per-song data file (`gen_v<N>.py` in the song
@@ -289,6 +298,11 @@ SONG = dict(
 - `words`: the transcription `align_lyrics.py` kept — `lyrics_aligned.json`'s `source`
   without `analysis/`.
 - `provenance`: the header line described in Showing uncertainty.
+- `transpose` (semitones, −11..11) / `capo` (fret): the chords print in the band's key or as
+  capo shapes, spelt from the new key; the "?" marks and `corrections` stay on the
+  recording's key, and chord names inside `notes` are not moved (the page says so). The same
+  from the command line: `chart_html.py gen_v1.py --transpose -2`.
+- `corrections`: the player's fixes as tests (above).
 - `method`: run through `str.format` with `{cells}`, `{lv_pct}`, `{tri_pct}` and `{n_q}`;
   write literal braces as `{{ }}`.
 
