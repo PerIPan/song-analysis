@@ -81,7 +81,22 @@ r = run(song / 'gen_v1.py', '--to', TMP / 'never', '--yes')
 check('a correction that no longer holds: refused, nothing written', r.returncode == 1
       and not (TMP / 'never').exists() and 'fix the chart first' in r.stdout, r.stdout + r.stderr)
 
+bad = TMP / 'badchrome'
+bad.write_text('#!/bin/sh\nexit 1\n')
+bad.chmod(0o755)
+before = sorted(p.name for p in band.iterdir())
 gen("(2, 1, 'chord', 'F')")
+r = subprocess.run([sys.executable, str(SCRIPT), str(song / 'gen_v1.py'), '--to', str(band),
+                    '--prefix', '3.3', '--yes'], capture_output=True, text=True,
+                   env=dict(env, MWS_CHROME=str(bad)))
+check('Chrome fails: exit 1, nothing written, the OK copy kept', r.returncode == 1
+      and sorted(p.name for p in band.iterdir()) == before and 'nothing written' in r.stdout,
+      (r.stdout, sorted(p.name for p in band.iterdir())))
+r = subprocess.run([sys.executable, str(SCRIPT), str(song / 'gen_v1.py'), '--to', str(TMP / 'ho'),
+                    '--yes', '--html-only'], capture_output=True, text=True,
+                   env=dict(env, MWS_CHROME=str(bad)))
+check('--html-only: the page alone', r.returncode == 0 and sorted(
+      p.suffix for p in (TMP / 'ho').iterdir()) == ['.html'], r.stdout + r.stderr)
 r = run('--rerender', songs)
 check('--rerender: a chart never rendered is listed as changed, not written', r.returncode == 0
       and 'CHANGED one' in r.stdout and not (song / 'Nobody - Paper Lanterns - Chords.html').exists(),

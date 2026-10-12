@@ -139,8 +139,8 @@ humanize, generative helpers.
   fire the groove during the count bar, it drops on the next downbeat.
 - **Odd meters:** set the Set's signature over raw TCP (`set_signature`, below) so the
   grid and bar numbers match. Live itself allows meter changes (time-signature markers in
-  the Arrangement; a scene's own tempo and meter, `Scene.signature_numerator` /
-  `signature_denominator` in the Live Object Model), but this Remote Script has no command
+  the Arrangement; a scene's own tempo and meter, `Scene.time_signature_numerator` /
+  `time_signature_denominator` with `time_signature_enabled` in the Live Object Model), but this Remote Script has no command
   for either, and the LOM cannot create Arrangement markers. So for scenes in different
   meters, use clip length: 5/4 = 5-beat clips, 7/8 = 3.5-beat clips — the same length for
   every clip in the scene **including the click**.

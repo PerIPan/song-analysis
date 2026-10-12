@@ -5,9 +5,9 @@
 cd "$(git rev-parse --show-toplevel)" || exit 1
 python3 run_tests.py --fast >/tmp/mws-pre-commit.log 2>&1 || {
     grep -v '^ok ' /tmp/mws-pre-commit.log; echo "pre-commit: tests failed"; exit 1; }
-names="$(git rev-parse --git-dir)/info/song-names"
+names="$(git rev-parse --git-path info/song-names)"   # also in linked worktrees
 if [ -s "$names" ]; then
-    files=$(git diff --cached --name-only --diff-filter=AM -- '*/SKILL.md' '*/references/*.md')
+    files=$(git diff --cached --name-only --diff-filter=ACMR -- '*/SKILL.md' '*/references/*.md')
     for f in $files; do
         hit=$(git show ":$f" | grep -n -i -w -F -f "$names")
         [ -n "$hit" ] && { echo "pre-commit: $f names a song:"; echo "$hit"; exit 1; }

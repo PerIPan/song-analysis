@@ -389,6 +389,27 @@ def main():
           and "chord_proposal.json" in err.getvalue() and (d / "stale.html").exists(),
           err.getvalue())
 
+    bl = d / "analysis" / "band_level.json"
+    F["downbeat_times"] = [t - 1.0 for t in F["downbeat_times"]]     # back on the grid
+    (d / "analysis" / "foundation.json").write_text(json.dumps(F), encoding="utf-8")
+    bl.write_text(json.dumps(dict(grouping=[2, 2], downbeats=[9.0, 17.0, 5],
+                                  cells=[[1, 1, 0.01]])), encoding="utf-8")
+    try:
+        build(S, d, "blstale.html")
+        check("band_level.json from another grid: refused", False, "rendered")
+    except ValueError as e:
+        check("band_level.json from another grid: refused", "band_level.json was made on "
+              "another grid" in str(e), e)
+    bl.write_text(json.dumps(dict(grouping=[3, 1], cells=[[1, 1, 0.01]])), encoding="utf-8")
+    try:
+        build(S, d, "blgroup.html")
+        check("band_level.json with another grouping: refused, not silently dropped", False,
+              "rendered")
+    except ValueError as e:
+        check("band_level.json with another grouping: refused, not silently dropped",
+              "grouping [3, 1]" in str(e), e)
+    bl.unlink()
+
     # ------------------------------------------------------------ 11/8 as 6+5
     ch = {(b, c): "Am" for b in range(1, 6) for c in (1, 2)}
     d = make_song([6, 5], 2.2, 5, ch, words=[("Cold", 0.1), ("winds", 1.0), ("carry", 1.3),
@@ -578,9 +599,13 @@ def main():
     check("CLI render: a broken correction warns, still renders", r.returncode == 0
           and "no longer holds" in r.stderr and (cwd / "broke.html").exists(), r.stderr)
     fix("kind.py", "(2, 2, 'beat', 'G')")
-    r = run(str(d / "kind.py"), "--check")
-    check("CLI: a correction of an unknown kind is refused", r.returncode == 1
-          and "'corrections' takes" in r.stderr, r.stderr)
+    r = run(str(d / "kind.py"), str(d / "fix.py"), "--check")
+    check("CLI --check: a song that errs (an unknown correction kind) is named, the rest "
+          "still checked, exit 2", r.returncode == 2 and "kind.py: ERROR 'corrections' takes"
+          in r.stdout and "fix.py: player corrections: 2/2 hold" in r.stdout, r.stdout + r.stderr)
+    r = run(str(d), "--check")
+    check("CLI --check with a song folder: its newest gen_v<N>.py", r.returncode == 0
+          and "gen_v1.py: no corrections" in r.stdout, r.stdout + r.stderr)
     r = run(str(d / "fix.py"), str(d / "broke.py"), "--out", "two.html")
     check("CLI: --out with two data files refused", r.returncode == 2, r.stderr)
     (d / "analysis" / "bass_per_cell.json").write_text('{"cells": [{"bar": 1}]}',

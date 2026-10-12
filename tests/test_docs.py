@@ -25,6 +25,8 @@ STALE = [  # (pattern, why it is wrong now)
     (r"`chords_lv` \(checked by `chord_proposal`\)", "Live takes the chart's chords"),
     (r"recorded as `user`", "foundation.py records agent or player (--decided-by)"),
     (r"another grid is warned about", "chart_html refuses evidence from another grid"),
+    (r"(?i)MCP can't touch Master", "patch 2 inserts devices on the Master track"),
+    (r"Scene\.signature_numerator", "the Scene property is time_signature_numerator"),
 ]
 SKILL_BUDGET = 20_000      # bytes (~5k tokens at 4 bytes a token)
 

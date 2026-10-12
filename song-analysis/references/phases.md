@@ -8,8 +8,8 @@ analysis venv; Whisper, lv-chordia, demucs and ADTOF have their own
 
 **Run order** (what `run.py` does): stems on the GPU lane first, the pulse beside them on
 the CPU lane; Whisper needs only the vocal stem; everything keyed by `(bar, cell)` waits for
-the meter and the downbeat check, and moving beat 1 later re-runs all of it (with
-`run.py`, ~30 s of compute).
+the meter, and mode, chords, validation and the chart also for the bass step's downbeat
+check. Moving beat 1 later re-runs all of it (with `run.py`, ~30 s of compute).
 
 ## Phase 1 — Pulse and key [pulse] (no meter assumed)
 

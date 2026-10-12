@@ -10,8 +10,11 @@ for the band, not after each fix.
 
 Names follow the band's folder: "<prefix> <Artist> - <Title> - chords - <key> <WiP|OK>"
 (.html, .pdf); --prefix is the set slot ("3.3"), --status WiP (the default: not yet
-checked by the band) or OK. A file of the same name with the other status (WiP -> OK) is
-replaced. The page count is reported (the band's charts run 1-3 pages).
+checked by the band) or OK. A file of the same name with the other status is replaced
+either way (OK -> a revised WiP too: the band's OK was for the old chart; the dry run says
+so). The PDF is printed first: if Chrome fails, nothing is written or removed (exit 1;
+--html-only publishes the page alone). The page count is reported (the band's charts run
+1-3 pages).
 
 --rerender ROOT re-renders every ROOT/*/ song's newest gen_v<N>.py in memory and lists the
 charts whose HTML would change - after a renderer change - writing them only with --yes.
@@ -22,6 +25,7 @@ template with {artist}, e.g. "~/Dropbox/Public/Band/{artist}". The PDF needs Chr
 
 Usage (python3, standard library only):
     publish_chart.py <song>/gen_v1.py [--to DIR] [--status WiP|OK] [--prefix 3.3] [--yes]
+        [--html-only]
     publish_chart.py --rerender ~/dev/songs [--yes]
 """
 from __future__ import annotations
@@ -78,7 +82,8 @@ def destination(S: dict, to: str | None) -> Path | None:
     return Path(tpl.format(artist=re.sub(r'[\\/:]', '-', S['artist']))).expanduser() if tpl else None
 
 
-def publish(data: str, to: str | None, status: str, prefix: str | None, yes: bool) -> int:
+def publish(data: str, to: str | None, status: str, prefix: str | None, yes: bool,
+            html_only: bool = False) -> int:
     S = load_song(data)
     doc, info = compose(S)
     report_corrections(info)
@@ -100,17 +105,25 @@ def publish(data: str, to: str | None, status: str, prefix: str | None, yes: boo
               + ''.join(f'  (replacing {p.name})\n' for p in old)
               + 'nothing written - ask the user, then run again with --yes')
         return 0
-    dest.mkdir(parents=True, exist_ok=True)
-    files[0].write_text(doc, encoding='utf-8')
-    with tempfile.TemporaryDirectory() as tmp:            # print from a local copy
-        local = Path(tmp) / 'chart.html'
+    with tempfile.TemporaryDirectory() as tmp:            # print first, from a local copy
+        local, pdf = Path(tmp) / 'chart.html', Path(tmp) / 'chart.pdf'
         local.write_text(doc, encoding='utf-8')
-        why = print_pdf(local, Path(tmp) / 'chart.pdf')
-        if why is None:
-            shutil.copyfile(Path(tmp) / 'chart.pdf', files[1])
+        why = None if html_only else print_pdf(local, pdf)
+        if why and not html_only:
+            print(f'publish_chart: {why} - nothing written or removed (--html-only publishes '
+                  'the page alone)')
+            return 1
+        dest.mkdir(parents=True, exist_ok=True)
+        files[0].write_text(doc, encoding='utf-8')
+        if not html_only:
+            shutil.copyfile(pdf, files[1])
+            n = pages(files[1])
+        elif files[1].exists():
+            files[1].unlink()                             # an older print of another chart
     for p in old:
         p.unlink()
-    n = pages(files[1]) if why is None else 0
+    why = 'HTML only' if html_only else None
+    n = 0 if html_only else n
     print(f'published {files[0].name}' + (f' and .pdf ({n} pages)' if n else f' ({why})')
           + f' to {dest}' + (f'; removed the {STATUSES[status == "WiP"]} copy' if old else ''))
     if n > 3:
@@ -149,6 +162,7 @@ def main() -> None:
     ap.add_argument('--status', choices=STATUSES, default='WiP')
     ap.add_argument('--prefix', help="the set slot, e.g. '3.3'")
     ap.add_argument('--yes', action='store_true', help='write (the user said yes)')
+    ap.add_argument('--html-only', action='store_true', help='no PDF (no Chrome here)')
     ap.add_argument('--rerender', metavar='ROOT', help='re-render every song folder under ROOT')
     a = ap.parse_args()
     sys.dont_write_bytecode = True
@@ -156,7 +170,7 @@ def main() -> None:
         ap.error('give a data file or --rerender ROOT')
     try:
         sys.exit(rerender(a.rerender, a.yes) if a.rerender else
-                 publish(a.data, a.to, a.status, a.prefix, a.yes))
+                 publish(a.data, a.to, a.status, a.prefix, a.yes, a.html_only))
     except (OSError, ValueError) as e:
         sys.exit(f'publish_chart: {e}')
 

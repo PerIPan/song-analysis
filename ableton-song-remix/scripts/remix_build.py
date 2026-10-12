@@ -26,8 +26,10 @@ A Set that already holds clips is refused (exit 2) unless --force (then tracks a
 are appended). Never run it while Claude is also calling mcp__ableton__* tools.
 
 build_report.json (beside the plan) records each step's seconds and commands ('timing') -
-a build ran ~1 s a command on Live 12.4, so the slow steps show - and, after a failure, the
-step and the command count it stopped at (status 'failed').
+a build ran ~1 s a command on Live 12.4, so the slow steps show. A build that fails after
+it started writing leaves build_report.failed.json instead: the step and the command count
+it stopped at (a refusal - Live closed, a Set not empty, no patch - writes nothing, and a
+good build_report.json is never overwritten).
 
 Usage (python3, standard library only):
     remix_build.py PLAN [--parts PARTS] [--dry-run] [--force] [--no-instruments] [--no-fx]
@@ -584,15 +586,16 @@ def main() -> None:
 
     def failed(code: int, msg: str):
         print(msg)
-        if not a.dry_run and b.sent:                  # where it stopped, for the next try
-            report_p.write_text(json.dumps(dict(
+        if not a.dry_run and b.at not in ('', 'probe'):  # it wrote to Live: where it stopped
+            (plan_p.parent / 'build_report.failed.json').write_text(json.dumps(dict(
                 status='failed', failed_step=b.at, failed_after=len(b.sent), error=msg,
                 timing=b.timing, warnings=b.warnings), indent=1))
         sys.exit(code)
     try:
         b.run(a.force)
-    except Stop as e:
-        failed(e.code, f'STOP: {e}')
+    except Stop as e:                                 # a refusal: nothing written to Live
+        print(f'STOP: {e}')
+        sys.exit(e.code)
     except Failed as e:
         failed(1, f'FAILED after {len(b.sent)} commands: {e}')
     except OSError as e:                              # the connection dropped mid-build
@@ -606,6 +609,7 @@ def main() -> None:
                     tempo=plan['tempo']['live'], signature=plan['grid']['time_signature'],
                     timing=b.timing, seconds=round(sum(x['seconds'] for x in b.timing), 1))
     report_p.write_text(json.dumps(b.report, indent=1))
+    (plan_p.parent / 'build_report.failed.json').unlink(missing_ok=True)
     slow = max(b.timing, key=lambda x: x['seconds'])
     print(f"built: {len(b.sent)} commands in {b.report['seconds']} s (slowest: {slow['step']}, "
           f"{slow['seconds']} s); tracks {b.report['tracks']}; instruments "

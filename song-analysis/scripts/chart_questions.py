@@ -172,9 +172,29 @@ def timer(F: dict, S: dict):
         if not (1 <= key[0] < len(db)) or key[1] > g.n:
             return ''
         end = g.start(g.next(key)) if g.next(key)[0] < len(db) else db[-1]
-        tenths = lambda s: f'{int(s // 60)}:{s % 60:04.1f}'      # a half-bar can be 1 s
         return f'{tenths(g.start(key))}-{tenths(end)}'
     return when
+
+
+def tenths(s: float) -> str:
+    """m:ss.s, rounded first (119.96 s is 2:00.0, not 1:60.0); a half-bar can be 1 s."""
+    d = round(s * 10)
+    return f'{d // 600}:{(d % 600) / 10:04.1f}'
+
+
+def cell_name(grouping: list):
+    """cell -> how a player names it: 'first half' / 'second half' in a bar of two equal
+    halves, nothing in a one-cell bar, else 'cell 2 of 3, beats 4-6' (pulses of the grouping)."""
+    def name(c: int) -> str:
+        n = len(grouping)
+        if n == 1:
+            return 'whole bar'
+        if n == 2 and grouping[0] == grouping[1]:
+            return 'first half' if c == 1 else 'second half'
+        b0 = sum(grouping[:c - 1]) + 1
+        b1 = b0 + grouping[c - 1] - 1
+        return f"cell {c} of {n}, {'pulse' if b0 == b1 else 'pulses'} {b0}{'' if b0 == b1 else f'-{b1}'}"
+    return name
 
 
 def score_round(prev: dict, S: dict) -> dict | None:
@@ -212,13 +232,15 @@ def main() -> None:
                     help='neither score the last round nor keep this one')
     a = ap.parse_args()
     S = runpy.run_path(a.data)['SONG']
+    S['chords'] = {k: lead_sheet(v) if isinstance(v, str) else v      # as the renderer reads
+                   for k, v in S['chords'].items()}                    # them (Harte labels)
     folder = Path(S.get('folder') or Path(a.data).resolve().parent)
     an = folder / 'analysis'
     fp = an / 'foundation.json'
     F = json.loads(fp.read_text()) if fp.exists() else {}
     when = timer(F, S)
     at = lambda key: f" at {when(key)}" if when(key) else ''
-    half = lambda c: 'first' if c == 1 else 'second' if c == 2 else f'cell {c}'
+    half = cell_name(list(S.get('grouping') or F.get('grouping') or [2, 2]))
     rnd, log = an / 'questions_round.json', an / 'questions_log.jsonl'
     if not a.no_log and rnd.exists():
         r = score_round(json.loads(rnd.read_text()), S)
@@ -233,14 +255,14 @@ def main() -> None:
         print(mq)
     breaks = pattern_breaks(S)
     for b in breaks:
-        print(f"pattern break: bar {b['bar']} ({half(b['cell'])} half, {b['section']}){at((b['bar'], b['cell']))}: "
+        print(f"pattern break: bar {b['bar']} ({half(b['cell'])}, {b['section']}){at((b['bar'], b['cell']))}: "
               f"chart {b['chart']}, but the section plays {b['usual']} there every other time (bars "
               f"{', '.join(map(str, b['like']))}) -> ask: {b['chart']} / {b['usual']}?")
     qs = questions(S, an)
     asked = {(b['bar'], b['cell']) for b in breaks} | {(q['bar'], q['cell']) for q in qs}
     pars = parallel_breaks(S, an, asked)
     for p in pars:
-        print(f"parallel check: bar {p['bar']} ({half(p['cell'])} half, {p['section']}){at((p['bar'], p['cell']))}: "
+        print(f"parallel check: bar {p['bar']} ({half(p['cell'])}, {p['section']}){at((p['bar'], p['cell']))}: "
               f"chart {p['chart']}, the parallel section plays {p['parallel']}, no bass to "
               f"decide -> ask: {p['chart']} / {p['parallel']}?")
     if not qs:
@@ -248,7 +270,7 @@ def main() -> None:
     qs.sort(key=lambda q: (not any(p != q['chart'] for p in q['parallel']), q['bar'], q['cell']))
     for q in qs[:a.max]:
         par = f", parallel section: {'/'.join(q['parallel'])}" if q['parallel'] else ''
-        print(f"bar {q['bar']} ({half(q['cell'])} half, {q['section']}){at((q['bar'], q['cell']))}: "
+        print(f"bar {q['bar']} ({half(q['cell'])}, {q['section']}){at((q['bar'], q['cell']))}: "
               f"chart {q['chart']}; lv-chordia {q['lv']}, triads {q['triads']}, bass "
               f"{q['bass'] or 'none'}{par} -> ask: {' / '.join(q['options'])}?")
     if len(qs) > a.max:

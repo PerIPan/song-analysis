@@ -79,10 +79,10 @@ next half-bar and held across it sits in the next cell.** Held = the line's next
 starts after the boundary, or none follows. Whisper times a word's first consonant and
 singers push into the beat, so "…once more" on beat 4.4 is heard on the next bar's chord,
 and "day" on beat 2.35 on the second half. A long word reaches its stress later, so its window grows half a beat per
-syllable past the second ("electrical", started 1.2 beats early, is heard on the next
-bar; Whisper's shorter stand-in "lectric" hid its length). **Stress and length.** A word of two or more syllables stressed on its first one ("Saturday",
+syllable past the second ("imagination", started 1.2 beats early, is heard on the next
+bar; Whisper's shorter stand-in "nation" hid its length). **Stress and length.** A word of two or more syllables stressed on its first one ("Saturday",
 "other", "window") is pushed only within 0.45 beat (`STRESS_FIRST`) — its stressed
-syllable is sung where it starts; one stressed later ("pretending", "electrical": an
+syllable is sung where it starts; one stressed later ("pretending", "imagination": an
 unstressed prefix or a stress-taking suffix) keeps the longer window. A one-syllable word
 held long inside a line is heard where it settles: "gone", sung on beat 3.5 and held five
 beats, belongs to the next bar (window 0.35 × its length, at most 1.75 beats). A pinned
@@ -248,7 +248,8 @@ everything measured from `analysis/`:
 ```bash
 python3 scripts/chart_html.py gen_v1.py         # → <artist> - <title> - Chords.html beside it
 python3 scripts/chart_html.py gen_v1.py --out <shared folder>/<name>.html
-python3 scripts/chart_html.py */gen_v1.py --check   # every song's corrections still hold?
+python3 scripts/chart_html.py <songs root>/*/ --check   # each song's newest data file:
+                                                      # do its corrections still hold?
 ```
 
 **The data file** is Python that defines `SONG`. `title`, `artist`, `sections` and

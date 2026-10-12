@@ -95,7 +95,8 @@ def main():
     cells = band_cells(a.stems, db, F.get("grouping") or [F.get("beats_per_bar", 4)])
     if cells:
         bl = Path(a.out).with_name("band_level.json")
-        json.dump({"grouping": F.get("grouping"), "cells": cells}, open(bl, "w"))
+        json.dump({"grouping": F.get("grouping"), "downbeats": [db[0], db[-1], len(db)],
+                   "cells": cells}, open(bl, "w"))       # the grid it was cut on
         stops = [(b, k) for b, k, v in cells if v < 0.15]
         print(f"wrote {bl}: {len(stops)} cells where the band drops under 0.15 of its median")
     print(f"wrote {a.out}: bars at >= 0.25 of full level, of {len(db) - 1}: " + ", ".join(

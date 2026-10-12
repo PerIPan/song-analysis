@@ -541,10 +541,14 @@ def main():
     m = MockLive(swallow={'add_warp_marker'})
     r = run('remix_build.py', plan_p, port=m.port)
     check('swallowed warp-marker error -> exit 1', r.returncode == 1 and 'add_warp_marker' in r.stdout)
-    fr = json.loads((plan_p.parent / 'build_report.json').read_text())
-    check('a failed build reports the step and command count it stopped at',
-          fr.get('status') == 'failed' and fr.get('failed_step') == 'stems and warp markers'
-          and fr.get('failed_after', 0) > 0 and 'add_warp_marker' in fr.get('error', ''), fr)
+    fp = plan_p.parent / 'build_report.failed.json'
+    fr = json.loads(fp.read_text()) if fp.exists() else {}
+    good = json.loads((plan_p.parent / 'build_report.json').read_text())
+    check('a failed build: build_report.failed.json with the step and command count; the '
+          'good report kept', fr.get('status') == 'failed' and fr.get('failed_step') ==
+          'stems and warp markers' and fr.get('failed_after', 0) > 0 and 'add_warp_marker'
+          in fr.get('error', '') and good.get('status') == 'built', (fr, good.get('status')))
+    fp.unlink(missing_ok=True)
     count = {'n': 0}
     def second_chunk(msg, _):
         if msg['type'] == 'add_notes_to_clip':
@@ -559,7 +563,8 @@ def main():
     port = closed.getsockname()[1]
     closed.close()
     r = run('remix_build.py', plan_p, port=port)
-    check('no Live -> exit 4', r.returncode == 4, r.stdout)
+    check('no Live -> exit 4, no failure report (nothing was written)', r.returncode == 4
+          and not (plan_p.parent / 'build_report.failed.json').exists(), r.stdout)
     r = run('remix_build.py', plan_p, '--dry-run', port=port)
     check('--dry-run prints the commands without a socket',
           r.returncode == 0 and '"create_audio_clip"' in r.stdout and 'nothing sent' in r.stdout,

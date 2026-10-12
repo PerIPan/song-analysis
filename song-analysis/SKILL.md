@@ -44,7 +44,7 @@ python3 scripts/run.py answer <song folder> --cycle 4 --decided-by player   # th
 
 The song folder holds the recording (Phase 0 fetches it from a name) and `lyrics.txt`.
 `run.py` runs every step with its interpreter, the GPU lane (demucs, Whisper) beside the
-CPU lane, and prints each step's summary as the script wrote it. It re-runs a step only
+CPU lane (one song's `run.py` at a time on one GPU; queue several songs one after another), and prints each step's summary as the script wrote it. It re-runs a step only
 when its inputs, answers or script changed, so it resumes after a usage limit or a fix.
 When a step asks, it stops what depends on the answer (the rest carries on) and prints
 the question and the `run.py answer` that settles it; the answer flags are the scripts'
@@ -139,11 +139,12 @@ finds it by ear. Each run scores the last round (changed, kept, fixes not on the
 **While the player corrects — data only, rules after.** One correction session cost two
 hours when each fix also changed the renderer, ran the tests, re-printed the shared PDF and
 made a commit. Per fix: edit only the data file (a fix in `chords`, the cell in `verified`,
-a word as a `'fixed'` lyric or in `stops`), add it to `corrections` (`(bar, cell, 'chord' |
-'word', value, 'player', date)`), re-render the draft locally. No renderer edits, commits,
+a word as a `'fixed'` lyric or in `stops`), add chord and word fixes to `corrections`
+(`(bar, cell, 'chord' | 'word', value, 'player', date)`; stops live in `stops` only),
+re-render the draft locally. No renderer edits, commits,
 PDFs or shared-folder writes during the session. After it, if fixes show a rule is wrong,
-change the rule once, run `chart_html.py */gen_v1.py --check` (every song's corrections must
-hold) before committing, and `publish_chart.py --rerender <songs root>` lists the charts the
+change the rule once, run `chart_html.py <songs root>/*/ --check` (each song's newest data
+file; every correction must hold) before committing, and `publish_chart.py --rerender <songs root>` lists the charts the
 change touches. Say in `provenance` what the player checked.
 
 **Publish — when the player says the chart is ready.**

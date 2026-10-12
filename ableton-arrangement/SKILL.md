@@ -115,7 +115,7 @@ parallel) → EQ Eight (HP 40 Hz, −2 dB @ 250, +3.5 dB @ 1k presence, +2 dB @ 
 **Lead — distortion:** rack "Amp Gain" macro 110–120 (88 = clean-ish, max 127), drop
 "Amp Volume" ~10 to compensate; Chorus-Ensemble + Reverb after the amp = soaring solo.
 
-**Mastering (MANUAL — MCP can't touch Master):** EQ Eight (HP 30 Hz, +1 dB @ 3k, +1.5 dB
+**Mastering** (stock Remote Script: by hand; patched — `ableton-mcp` patch 2 — `insert_device` on the Master track, or `remix_build.py --master`): EQ Eight (HP 30 Hz, +1 dB @ 3k, +1.5 dB
 @ 10k air) → Glue Compressor (2:1, Attack 10 ms, Release Auto, Makeup +2 dB, 1–2 dB GR)
 → Limiter (ceiling −0.3 dB, ~−12 LUFS modern / ~−9 LUFS aggressive punk).
 

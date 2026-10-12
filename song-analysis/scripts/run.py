@@ -20,7 +20,8 @@ The audio is the song folder's one recording (source.json's file when Phase 0 fe
 --audio once otherwise). Lyrics: lyrics.txt in the folder (Phases 5b and 6 skip without
 it). The stems go to stems/htdemucs_ft/<slug>/ (and htdemucs_6s, unless --no-6s); a
 folder analysed by hand is picked up as it is - steps whose outputs exist are adopted as
-done, and validate_artifacts.py still checks them against the grid. The chart step renders
+done, the meter, tempo-octave and bass-entry choices it was made with become its answers
+(so a re-run keeps them), and a script edit alone doesn't re-run an adopted step. The chart step renders
 the newest gen_v<N>.py and lists the player's questions; without one it says to write it.
 
 Interpreters: $MWS_<ROLE>_PY, else ~/.config/music-workflow-skills/env.json, roles
@@ -39,9 +40,9 @@ ffmpeg or the audio missing).
 """
 from __future__ import annotations
 
-import argparse, hashlib, json, os, re, shutil, subprocess, sys, time
+import argparse, hashlib, json, os, platform, re, shutil, subprocess, sys, time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
@@ -53,16 +54,44 @@ LANES = {'gpu': 1, 'cpu': 2}                  # jobs at once per lane (16 GB: on
 PULSE = ('beat_times', 'pulse_bpm')           # foundation.json fields each phase reads
 METER = ('downbeat_times', 'grouping', 'beats_per_bar', 'pulse_unit')
 NOISE = re.compile(r'\w+Warning:|warnings\.warn|^\s*warn\(|%\||it/s\]|^\s*$')  # libraries' chatter
+def whole(lo: int):
+    def check(v: str) -> int:
+        if not v.isdigit() or int(v) < lo:
+            raise argparse.ArgumentTypeError(f'a whole number >= {lo}')
+        return int(v)
+    return check
+
+
+def positive(v: str) -> float:
+    if float(v) <= 0:
+        raise argparse.ArgumentTypeError('a positive number')
+    return float(v)
+
+
+def unit(v: str) -> int:
+    if v not in ('4', '8'):
+        raise argparse.ArgumentTypeError('4 (quarter) or 8 (eighth)')
+    return int(v)
+
+
+def groups(v: str) -> str:
+    if not re.fullmatch(r'\d+(,\d+)*', v):
+        raise argparse.ArgumentTypeError('pulses per group, e.g. 6,5 or 2,2,3')
+    return v
+
+
+METER_KEYS = ('cycle', 'grouping', 'downbeat_pulse', 'pulse_unit', 'use_alternative')
 ANSWERS = {  # answer -> (type, help); the meter / pulse / bass ones are the scripts' flags
-    'cycle': (int, 'pulses per bar (foundation.py meter)'),
-    'grouping': (str, 'e.g. 6,5 (foundation.py meter)'),
-    'downbeat_pulse': (int, "beat index of the first '1' (foundation.py meter)"),
+    'cycle': (whole(2), 'pulses per bar (foundation.py meter)'),
+    'grouping': (groups, 'e.g. 6,5 (foundation.py meter)'),
+    'downbeat_pulse': (whole(0), "beat index of the first '1' (foundation.py meter)"),
     'use_alternative': (bool, "take the sweep's alternative beat 1 (foundation.py meter)"),
-    'pulse_unit': (int, '4 or 8 (foundation.py meter)'),
-    'decided_by': (str, 'agent (Claude chose) or player (the player counted / confirmed)'),
-    'min_bpm': (float, 'force a faster tempo octave (foundation.py pulse)'),
-    'max_bpm': (float, 'force a slower tempo octave (foundation.py pulse)'),
-    'bass_entry_bar': (int, 'bass notes before this bar are bleed (bass_notes.py)'),
+    'pulse_unit': (unit, '4 or 8 (foundation.py meter)'),
+    'decided_by': (str, 'agent (Claude chose) or player (the player counted / confirmed); '
+                        'a meter answer without it is Claude\'s'),
+    'min_bpm': (positive, 'force a faster tempo octave (foundation.py pulse)'),
+    'max_bpm': (positive, 'force a slower tempo octave (foundation.py pulse)'),
+    'bass_entry_bar': (whole(1), 'bass notes before this bar are bleed (bass_notes.py)'),
     'keep_downbeat': (bool, 'the harmony is pushed on purpose: keep beat 1 (DOWNBEAT CHECK)'),
     'language': (str, 'force the Whisper language, e.g. en, el'),
     'no_6s': (bool, 'skip the htdemucs_6s split (a chart only, no guitar/piano parts)'),
@@ -79,6 +108,7 @@ class Ctx:
     env: dict
     audio: Path | None = None
     log: Callable[[str], None] = print
+    own: set = field(default_factory=set)       # answers this process set (merged on save)
 
     @property
     def a(self) -> Path:
@@ -95,9 +125,26 @@ class Ctx:
     def stem(self, name: str, model: str = 'htdemucs_ft') -> Path:
         return self.song / 'stems' / model / self.slug / f'{name}.wav'
 
+    def set_answer(self, key: str, value) -> None:
+        self.own.add(key)
+        if value is None:
+            self.answers.pop(key, None)
+        else:
+            self.answers[key] = value
+
     def save(self) -> None:
+        """Write run.json, keeping answers given meanwhile from another process
+        (`run.py answer` during a run): the file's answers, then this process's own."""
         self.a.mkdir(exist_ok=True)
-        (self.a / 'run.json').write_text(json.dumps(self.state, indent=1))
+        rj = self.a / 'run.json'
+        try:
+            disk = json.loads(rj.read_text()).get('answers', {}) if rj.exists() else {}
+        except json.JSONDecodeError:
+            disk = {}
+        merged = {k: v for k, v in disk.items() if k not in self.own}
+        merged.update({k: v for k, v in self.answers.items() if k in self.own or k not in disk})
+        self.state['answers'] = merged
+        rj.write_text(json.dumps(self.state, indent=1))
 
 
 def load_env() -> dict:
@@ -205,10 +252,28 @@ def meter_flags(c: Ctx) -> list:
     return out + ['--decided-by', A.get('decided_by') or 'agent']
 
 
+def grid_fp(c: Ctx) -> str | None:
+    """The bar grid now (foundation.json's meter fields): bar numbers mean this grid."""
+    return fingerprint(c.a / 'foundation.json', METER)
+
+
+def entry_bar(c: Ctx) -> int | None:
+    """The bass entry bar: the user's answer, else the one taken from bass_notes' hint while
+    the grid it was counted on still stands."""
+    auto = c.answers.get('bass_entry_auto') or {}
+    return c.answers.get('bass_entry_bar') or (auto.get('bar') if auto.get('grid') == grid_fp(c)
+                                               else None)
+
+
+def kept_downbeat(c: Ctx) -> bool:
+    """--keep-downbeat holds for the grid it was given on, not after beat 1 or the meter moved."""
+    return bool(c.answers.get('keep_downbeat')) and c.answers['keep_downbeat'] == grid_fp(c)
+
+
 def bass_after(c: Ctx, out: str):
     """DOWNBEAT CHECK is a question unless kept on purpose; a suggested later bass entry is
-    taken (recorded in the answers) and the step runs again with it."""
-    if 'DOWNBEAT CHECK' in out and not c.answers.get('keep_downbeat'):
+    taken (for this grid) and the step runs again with it."""
+    if 'DOWNBEAT CHECK' in out and not kept_downbeat(c):
         line = next(l for l in out.splitlines() if 'DOWNBEAT CHECK' in l)
         k = re.search(r'--downbeat-pulse (\d+)', line)
         return ('ask', f'{line}\n  answer: run.py answer "{c.song}" --downbeat-pulse '
@@ -217,8 +282,8 @@ def bass_after(c: Ctx, out: str):
                        f'if the harmony is pushed on purpose')
     B = json.loads((c.a / 'bass_notes.json').read_text())
     hint = B.get('suggested_entry_bar', 1)
-    if hint > B.get('bass_entry_bar', 1) and 'bass_entry_bar' not in c.answers:
-        c.answers['bass_entry_bar'] = hint
+    if hint > B.get('bass_entry_bar', 1) and entry_bar(c) is None:
+        c.set_answer('bass_entry_auto', {'bar': hint, 'grid': grid_fp(c)})
         c.log(f'  -> bass enters at bar {hint}: running again with --bass-entry-bar {hint} '
               f'(run.py answer --bass-entry-bar N to change)')
         return 'redo'
@@ -275,9 +340,8 @@ def steps() -> list[Step]:
              lambda c: [(A(c, n), None) for n in ('bass_notes.json', 'bass_per_cell.json')],
              lambda c: [[c.env['analysis'], S('bass_notes.py'), str(c.stem('bass')),
                          '--foundation', 'analysis/foundation.json', '--outdir', 'analysis']
-                        + (['--bass-entry-bar', str(c.answers['bass_entry_bar'])]
-                           if c.answers.get('bass_entry_bar') else [])],
-             params=lambda c: {k: c.answers.get(k) for k in ('bass_entry_bar', 'keep_downbeat')},
+                        + (['--bass-entry-bar', str(entry_bar(c))] if entry_bar(c) else [])],
+             params=lambda c: {'entry': entry_bar(c), 'keep_downbeat': kept_downbeat(c)},
              scripts=('bass_notes.py',), after=bass_after),
         Step('lyrics', 'whisper', 'gpu', ('stems',),
              lambda c: [(c.stem('vocals'), ())], lambda c: [(A(c, 'lyrics.json'), None)],
@@ -371,9 +435,13 @@ def steps() -> list[Step]:
              lambda c: [[c.env['py'], S('validate_artifacts.py'), 'analysis']],
              scripts=('validate_artifacts.py',), optional=('align',)),
         Step('chart', 'py', 'cpu', ('validate', 'activity'),
-             lambda c: [(chart_file(c), ())] + ff(c, *[A(c, n) for n in (
-                 'chords_lv.json', 'chord_proposal.json', 'bass_per_cell.json',
-                 'stem_activity.json', 'band_level.json', 'lyrics_mix.json', 'lyrics.json')]),
+             lambda c: [(chart_file(c), ()),
+                        (A(c, 'foundation.json'), METER + ('decided_by', 'to_confirm',
+                                                           'time_signature'))]
+                       + [(A(c, n), ()) for n in (
+                           'chords_lv.json', 'chord_proposal.json', 'bass_per_cell.json',
+                           'stem_activity.json', 'band_level.json', 'lyrics_mix.json',
+                           'lyrics.json', 'lyrics_aligned.json', 'sections.json')],
              lambda c: [],
              lambda c: [[c.env['py'], S('chart_html.py'), chart_file(c).name],
                         [c.env['py'], S('chart_questions.py'), chart_file(c).name]],
@@ -395,8 +463,16 @@ def demucs(c: Ctx, model: str) -> list:
     tmp.parent.mkdir(parents=True, exist_ok=True)
     return [[c.env['ffmpeg'] or 'ffmpeg', '-v', 'error', '-y', '-i', str(c.audio),
              '-c:a', 'pcm_s16le', str(tmp)],
-            [c.env['demucs'], '-m', 'demucs', '-n', model, '-d', 'mps', '-o',
+            [c.env['demucs'], '-m', 'demucs', '-n', model, *device(c.env), '-o',
              str(c.song / 'stems'), str(tmp)]]
+
+
+def device(env: dict) -> list:
+    """demucs -d: env.json's demucs_device or $MWS_DEMUCS_DEVICE, else mps on Apple Silicon,
+    else none (demucs picks CUDA or the CPU)."""
+    d = env.get('demucs_device') or ('mps' if sys.platform == 'darwin'
+                                     and platform.machine() == 'arm64' else None)
+    return ['-d', d] if d else []
 
 
 # ------------------------------------------------------------------ engine
@@ -415,6 +491,8 @@ def state_of(c: Ctx, st: Step, done: dict) -> tuple[str, str]:
     why = st.skip(c)
     if why and not (st.writes(c) and outs_ok):          # made before (by hand): keep it
         return 'skip', why
+    if rec and rec.get('failed'):                       # its outputs are the old ones
+        return ('stale' if outs_ok else 'todo'), 'its last run failed'
     if rec and rec.get('question') and not answered(c, rec):
         return 'asks', rec['question'].splitlines()[0]
     if not outs_ok:
@@ -424,13 +502,14 @@ def state_of(c: Ctx, st: Step, done: dict) -> tuple[str, str]:
         return ('done', 'adopted') if st.writes(c) else ('todo', 'never run')
     changed = [k for k in now['reads'] if now['reads'][k] != rec['parts']['reads'].get(k)]
     changed += [f'answers {now["params"]}'] if now['params'] != rec['parts']['params'] else []
-    changed += [f'script {s}' for s in now['scripts']
-                if now['scripts'][s] != rec['parts']['scripts'].get(s)]
+    changed += [f'script {s}' for s in now['scripts'] if not rec.get('adopted')
+                and now['scripts'][s] != rec['parts']['scripts'].get(s)]
     return ('stale', 'changed: ' + ', '.join(changed)) if changed else ('done', '')
 
 
 def answered(c: Ctx, rec: dict) -> bool:
-    return bool(rec.get('resolved_by') and c.answers.get(rec['resolved_by']))
+    k = rec.get('resolved_by')
+    return kept_downbeat(c) if k == 'keep_downbeat' else bool(k and c.answers.get(k))
 
 
 def show(name: str, secs: float, out: str, err: str, code: int) -> str:
@@ -471,11 +550,48 @@ def closure(table: dict, until: str | None) -> list[str]:
     return [n for n in table if n in need]
 
 
+def adopt_answers(c: Ctx) -> None:
+    """A folder analysed by hand: the choices its files record become its answers, so a later
+    re-run of pulse, meter or bass keeps them - a tempo octave forced in the pulse step, the
+    cycle, grouping, beat 1 and pulse unit set by flags (provenance 'user', 'agent' or
+    'player'; 'user' is recorded as Claude's call), a bass entry bar."""
+    F = json.loads((c.a / 'foundation.json').read_text()) if (c.a / 'foundation.json').exists() else {}
+    prov, seed = F.get('provenance', {}), {}
+    m = re.search(r'DBN, ([\d.]+)-([\d.]+) BPM', str(prov.get('pulse', '')))
+    if m and float(m.group(1)) != 55:
+        seed['min_bpm'] = float(m.group(1))
+    if m and float(m.group(2)) != 215:
+        seed['max_bpm'] = float(m.group(2))
+    chosen = lambda k: str(prov.get(k, '')).startswith(('user', 'agent', 'player'))
+    if 'downbeat_times' in F:
+        if chosen('cycle'):
+            seed['cycle'] = F['beats_per_bar']
+        if chosen('grouping'):
+            seed['grouping'] = ','.join(map(str, F['grouping']))
+        if chosen('downbeat'):
+            seed['downbeat_pulse'] = F['downbeat_pulse']
+        if chosen('pulse_unit'):
+            seed['pulse_unit'] = F['pulse_unit']
+        if any(chosen(k) for k in ('cycle', 'grouping', 'downbeat', 'pulse_unit')):
+            seed['decided_by'] = ('player' if any(str(v).startswith('player') for v in prov.values())
+                                  else 'agent')
+    B = c.a / 'bass_notes.json'
+    if B.exists() and json.loads(B.read_text()).get('bass_entry_bar', 1) > 1:
+        seed['bass_entry_bar'] = json.loads(B.read_text())['bass_entry_bar']
+    seed = {k: v for k, v in seed.items() if k not in c.answers}
+    for k, v in seed.items():
+        c.set_answer(k, v)
+    if seed:
+        c.log(f'adopted the answers this folder was made with: {seed}')
+
+
 def run(c: Ctx, table: dict, targets: list, redo: set = frozenset()) -> int:
     """Run the targets in dependency order on the two lanes. 0 all done, 1 a failure, 2 a
     question pending. A done step waits while anything upstream runs again, then is
     checked once more (pulse rewrites foundation.json: the meter must follow it)."""
     c.a.mkdir(exist_ok=True)                              # a fresh folder: the scripts write here
+    if not c.state.get('steps'):
+        adopt_answers(c)
     status = {}
     for n in targets:
         s, why = state_of(c, table[n], status)
@@ -553,7 +669,7 @@ def run(c: Ctx, table: dict, targets: list, redo: set = frozenset()) -> int:
                 with open(c.a / 'timings.jsonl', 'a') as tf:
                     tf.write(json.dumps(dict(step=n, seconds=round(secs, 1), exit=code,
                                              at=time.strftime('%Y-%m-%dT%H:%M:%S'))) + '\n')
-                if code == 2 or 'NEEDS A DECISION' in err:
+                if 'NEEDS A DECISION' in err or 'NEEDS A DECISION' in out:
                     q = '\n'.join(l for l in err.splitlines() if l.strip()) or out.strip()
                     q += (f'\n  answer: run.py answer "{c.song}" <the flags it names> '
                           f'(--decided-by player if the player counted), then run again')
@@ -562,8 +678,9 @@ def run(c: Ctx, table: dict, targets: list, redo: set = frozenset()) -> int:
                 if code:
                     failed.append((n, f'exit {code} (analysis/logs/{n}.log)'))
                     status[n] = 'failed'
-                    c.state['steps'].pop(n, None)
+                    c.state['steps'][n] = dict(failed=True, parts=None)
                     block(n)
+                    c.save()
                     continue
                 verdict = st.after(c, out) if st.after else None
                 if verdict == 'redo':
@@ -647,9 +764,16 @@ def cmd_run(a) -> int:
     if bad:
         print(f'run.py: unknown step {bad}; steps: {", ".join(table)}')
         return 3
+    targets = closure(table, a.until)
+    missing = sorted({table[n].role for n in targets if table[n].role != 'py'
+                      and not table[n].skip(c) and not (c.env.get(table[n].role)
+                                                        and Path(c.env[table[n].role]).exists())})
+    if missing:
+        print(f'run.py: no interpreter for {", ".join(missing)}: run.py doctor')
+        return 3
     print(f'{c.song.name}: {c.audio.name} -> stems/htdemucs_ft/{c.slug}/'
           + (' (models cached: offline)' if c.state['offline'] else ''))
-    return run(c, table, closure(table, a.until), set(a.redo))
+    return run(c, table, targets, set(a.redo))
 
 
 def cmd_answer(a) -> int:
@@ -657,12 +781,12 @@ def cmd_answer(a) -> int:
     for k, (typ, _) in ANSWERS.items():
         v = getattr(a, k)
         if v is not None and v is not False:
-            c.answers[k] = v
-    if a.decided_by is None and any(getattr(a, k) is not None for k in
-                                    ('cycle', 'grouping', 'downbeat_pulse', 'pulse_unit')):
-        c.answers.setdefault('decided_by', 'agent')
+            c.set_answer(k, grid_fp(c) if k == 'keep_downbeat' else v)
+    given = lambda k: getattr(a, k) is not None and getattr(a, k) is not False   # 0 counts
+    if a.decided_by is None and any(given(k) for k in METER_KEYS):
+        c.set_answer('decided_by', 'agent')               # a meter answer without it: Claude's
     for k in a.clear or []:
-        c.answers.pop(k.replace('-', '_'), None)
+        c.set_answer(k.replace('-', '_'), None)
     for n, rec in list(c.state.get('steps', {}).items()):   # an answer reopens its question
         if rec.get('question') and not answered(c, rec):
             rec.pop('question', None)

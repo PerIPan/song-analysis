@@ -20,15 +20,17 @@ is neither the root nor the slash bass). Near-ties and triad-only objections are
 marked: on real songs they flagged 20-50% of cells, mostly sus/add9 voicings. A cell whose
 lv-chordia chord covers under half of it (a change inside) gets a dashed underline.
 Evidence made on another grid, or with another grouping, is refused (--allow-stale:
-warned about, and rendered). Columns keep
+warned about, and rendered): chords_lv.json, chord_proposal.json and bass_per_cell.json
+by their cells' start times, band_level.json by the downbeats it records. Columns keep
 their share of the row whatever the labels: a label too wide for its cell (a phone, print)
 shrinks to fit, next to room kept for a "?"; a section's name prints on its first row only
 ('repeat_sections' puts it on every row), and the song map's meters print without background graphics.
 
 Usage (python3, standard library only):
     chart_html.py <song>/gen_v1.py [--out PATH]     # default <folder>/<out>
-    chart_html.py <song>/gen_v1.py ... --check      # nothing written; exit 1 when a
-                                                    # player correction no longer holds
+    chart_html.py <songs root>/*/ --check           # every song's newest data file, nothing
+                                                    # written: exit 1 when a player correction
+                                                    # no longer holds, 2 when a song errs
     from chart_html import render; render(SONG)     # returns the path written
 
 Reads <folder>/analysis/: foundation.json (downbeat_times, grouping, pulse_unit),
@@ -875,8 +877,20 @@ def compose(S: dict, allow_stale: bool = False) -> tuple[str, dict]:
     bass = {(c['bar'], c['cell']): c['pc_seconds'] for c in BASS['cells']}
     act = rd('stem_activity.json') if (a / 'stem_activity.json').exists() else {}
     bl = rd('band_level.json') if (a / 'band_level.json').exists() else {}
-    out_cells = {(b, k) for b, k, v in bl.get('cells', []) if v < STOP
-                 and bl.get('grouping') in (None, grouping)}
+    fdb, bdb = F['downbeat_times'], bl.get('downbeats')
+    why = (f"grouping {bl['grouping']}, the grid's is {grouping}" if bl.get('grouping')
+           and list(bl['grouping']) != grouping else
+           f'downbeats {bdb}, the grid has [{fdb[0]}, {fdb[-1]}, {len(fdb)}]'
+           if bdb and (bdb[2] != len(fdb) or abs(bdb[0] - fdb[0]) > 0.05
+                       or abs(bdb[1] - fdb[-1]) > 0.05) else None)
+    if why and not allow_stale:
+        raise ValueError(f'band_level.json was made on another grid ({why}) - re-run '
+                         'stem_activity.py (--allow-stale renders anyway, without its stops)')
+    if why:
+        print(f'warning: band_level.json was made on another grid ({why}) - its stops are '
+              'left out; re-run stem_activity.py', file=sys.stderr)
+        bl = {}
+    out_cells = {(b, k) for b, k, v in bl.get('cells', []) if v < STOP}
     out_cells |= {tuple(k) for k in S.get('stops', ())}       # the player's own stops
     stops = frozenset(k for k in out_cells                    # the half-bars the band is out
                       if S['chords'].get(k) not in (None, 'N.C.'))
@@ -1007,8 +1021,8 @@ def load_song(path: str | Path) -> dict:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("song", nargs="+",
-                    help="chart data file(s) defining SONG, e.g. <song folder>/gen_v1.py")
+    ap.add_argument("song", nargs="+", help="chart data file(s) defining SONG, e.g. <song "
+                    "folder>/gen_v1.py, or song folders (their newest gen_v<N>.py)")
     ap.add_argument("--out", help="HTML path, one data file only (default: <folder>/<SONG['out']>)")
     ap.add_argument("--check", action="store_true",
                     help="write nothing; exit 1 when a player correction no longer holds")
@@ -1018,9 +1032,12 @@ def main():
     if a.out and len(a.song) > 1:
         ap.error("--out takes one data file")
     sys.dont_write_bytecode = True                # no __pycache__ in the song folder
-    failed = 0
-    for song in a.song:
+    songs = [newest(s) for s in a.song]
+    failed = errors = 0
+    for song in songs:
         try:
+            if song is None:
+                raise ValueError('no gen_v<N>.py in that folder')
             if a.check:
                 _, info = compose(load_song(song), a.allow_stale)
                 print(f'{song}:', end=' ')
@@ -1028,11 +1045,22 @@ def main():
                 failed += bool(info['failed'])
             else:
                 render(load_song(song), a.out, a.allow_stale)
-        except (OSError, ValueError) as e:
-            sys.exit(f'chart_html: {e}')
-        except Exception as e:  # anything else wrong in the data file or analysis/: no traceback
-            sys.exit(f'chart_html: {type(e).__name__}: {e}')
-    sys.exit(1 if failed else 0)
+        except Exception as e:     # a bad data file or analysis/: no traceback
+            why = str(e) if isinstance(e, (OSError, ValueError)) else f'{type(e).__name__}: {e}'
+            if not a.check:
+                sys.exit(f'chart_html: {why}')
+            print(f'{song}: ERROR {why}')                # --check carries on with the rest
+            errors += 1
+    sys.exit(2 if errors else 1 if failed else 0)
+
+
+def newest(path: str) -> str | None:
+    """A data file as given; a song folder -> its newest gen_v<N>.py."""
+    p = Path(path)
+    if not p.is_dir():
+        return path
+    gens = sorted(p.glob('gen_v*.py'), key=lambda g: int(re.sub(r'\D', '', g.stem) or 0))
+    return str(gens[-1]) if gens else None
 
 
 if __name__ == "__main__":

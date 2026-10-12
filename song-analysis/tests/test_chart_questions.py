@@ -140,4 +140,15 @@ check('CLI: the next run scores it into the log', "last round's list" in r2.stdo
 r3 = run('--no-log')
 check('CLI --no-log: no score, log untouched', "last round" not in r3.stdout
       and len(log.read_text().splitlines()) == 1, r3.stdout)
+from chart_questions import cell_name as where, tenths  # noqa: E402
+check('m:ss.s rounds before splitting (119.96 s -> 2:00.0)', tenths(119.96) == '2:00.0'
+      and tenths(61.04) == '1:01.0', (tenths(119.96), tenths(61.04)))
+check('cells named by the grouping, never "half" in a 3-cell or 1-cell bar',
+      [where([2, 2])(2), where([3])(1), where([2, 2, 3])(3), where([6, 5])(1)] ==
+      ['second half', 'whole bar', 'cell 3 of 3, pulses 5-7', 'cell 1 of 2, pulses 1-6'],
+      [where([2, 2])(2), where([3])(1), where([2, 2, 3])(3), where([6, 5])(1)])
+gen({**chords, (2, 1): 'A:min', (2, 2): 'A:min'})
+r4 = run('--no-log')
+check("Harte labels in the data file are read as the chart shows them (no 'A:min' option)",
+      'A:min /' not in r4.stdout and '/ A:min' not in r4.stdout, r4.stdout)
 sys.exit(1 if fails else 0)

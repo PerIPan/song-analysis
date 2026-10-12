@@ -1,7 +1,8 @@
 #!/bin/sh
 # No song names in commit messages (list: .git/info/song-names, local, never committed).
-names="$(git rev-parse --git-dir)/info/song-names"
+names="$(git rev-parse --git-path info/song-names)"   # also in linked worktrees
 [ -s "$names" ] || exit 0
-hit=$(grep -v '^#' "$1" | grep -i -w -F -f "$names")
+# the message only: git commit -v appends the diff below a scissors line
+hit=$(sed '/^# -* >8 -*$/,$d' "$1" | grep -v '^#' | grep -i -w -F -f "$names")
 [ -z "$hit" ] || { echo "commit-msg: the message names a song: $hit"; exit 1; }
 exit 0

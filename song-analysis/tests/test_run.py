@@ -181,6 +181,76 @@ shutil.rmtree(c.a)                     # a fresh folder: no analysis/ yet
 R.run(c, {'w': step('w', code="P('analysis/w.json').write_text('1')", writes=['w.json'])}, ['w'])
 check('a fresh folder: analysis/ made before the first step', (c.a / 'w.json').exists())
 
+# ---------------------------------------------------------------- review fixes (2026-10-12)
+c = song()
+X = step('x', code=log_line('x', "P('analysis/x.json').write_text('1')"), writes=['x.json'],
+         params=lambda c: {'v': c.answers.get('v')})
+R.run(c, {'x': X}, ['x'])
+c.answers['v'] = 1
+Xbad = step('x', code="sys.exit(1)", writes=['x.json'], params=lambda c: {'v': c.answers.get('v')})
+R.run(c, {'x': Xbad}, ['x'])
+check('a failed re-run is not adopted next time: its old outputs are stale',
+      R.state_of(c, X, {}) == ('stale', 'its last run failed'), R.state_of(c, X, {}))
+c = song()
+Q2 = step('q2', code="sys.stderr.write('usage: oops\\n');sys.exit(2)")
+code = R.run(c, {'q2': Q2}, ['q2'])
+check('exit 2 without NEEDS A DECISION is a failure, not a question',
+      code == 1 and R.state_of(c, Q2, {})[0] in ('todo', 'stale'), (code, R.state_of(c, Q2, {})))
+
+c = song()
+(c.a / 'foundation.json').write_text(json.dumps(dict(
+    beat_times=[0, 1], pulse_bpm=87, downbeat_times=[0, 4], grouping=[2, 2], beats_per_bar=4,
+    downbeat_pulse=2, pulse_unit=4, provenance=dict(pulse='measured (madmom DBN, 55-120 BPM)',
+    cycle='user', grouping='convention', downbeat='user', pulse_unit='default (quarter)'))))
+(c.a / 'bass_notes.json').write_text(json.dumps(dict(bass_entry_bar=25)))
+R.adopt_answers(c)
+check("adoption takes the choices the files record (legacy 'user' = Claude's call)",
+      c.answers == {'max_bpm': 120.0, 'cycle': 4, 'downbeat_pulse': 2, 'decided_by': 'agent',
+                    'bass_entry_bar': 25}, c.answers)
+check('...so the meter re-runs with them', R.meter_flags(c) ==
+      ['--cycle', '4', '--downbeat-pulse', '2', '--decided-by', 'agent'], R.meter_flags(c))
+table = {s.name: s for s in R.steps()}
+c.state['steps'] = {'pulse': dict(parts=dict(R.key_parts(c, table['pulse']), scripts={
+    'foundation.py': 'old'}), adopted=True)}
+check('an adopted step ignores a script edit', R.state_of(c, table['pulse'], {}) == ('done', ''),
+      R.state_of(c, table['pulse'], {}))
+c.answers.pop('bass_entry_bar')
+c.set_answer('bass_entry_auto', {'bar': 5, 'grid': R.grid_fp(c)})
+c.set_answer('keep_downbeat', R.grid_fp(c))
+was = (R.entry_bar(c), R.kept_downbeat(c))
+F = json.loads((c.a / 'foundation.json').read_text())
+(c.a / 'foundation.json').write_text(json.dumps(dict(F, downbeat_times=[0.5, 4.5])))
+check('a taken bass entry and --keep-downbeat hold only on the grid they were given on',
+      was == (5, True) and (R.entry_bar(c), R.kept_downbeat(c)) == (None, False),
+      (was, R.entry_bar(c), R.kept_downbeat(c)))
+c.save()
+rj = json.loads((c.a / 'run.json').read_text())
+rj['answers']['language'] = 'el'                    # `run.py answer` from another shell
+(c.a / 'run.json').write_text(json.dumps(rj))
+c.set_answer('min_bpm', 70.0)
+c.save()
+check('an answer written meanwhile by another process survives this one saving',
+      json.loads((c.a / 'run.json').read_text())['answers'].get('language') == 'el'
+      and c.answers.get('min_bpm') == 70.0, json.loads((c.a / 'run.json').read_text())['answers'])
+import subprocess, os
+env = dict(os.environ, HOME=str(TMP / 'nohome'), MWS_FFMPEG='/bin/echo',
+           MWS_ANALYSIS_PY=str(TMP / 'nope'))
+cli = lambda *x: subprocess.run([sys.executable, str(SCRIPTS / 'run.py'), *x], capture_output=True,
+                                text=True, env=env)
+c = song()
+c.save()
+cli('answer', str(c.song), '--cycle', '4', '--decided-by', 'player')
+r = cli('answer', str(c.song), '--downbeat-pulse', '0')
+check("a meter answer without --decided-by is Claude's, even after a player's",
+      json.loads((c.a / 'run.json').read_text())['answers'] == {'cycle': 4, 'decided_by': 'agent',
+                                                                'downbeat_pulse': 0}, r.stdout)
+r = cli('answer', str(c.song), '--pulse-unit', '6')
+check('answers are checked like the scripts check them (--pulse-unit 4 or 8)',
+      r.returncode == 2 and '4 (quarter) or 8' in r.stderr, r.stderr[-200:])
+r = cli('run', str(c.song), '--until', 'pulse')
+check('a missing interpreter stops the run before anything starts: exit 3',
+      r.returncode == 3 and 'no interpreter for analysis' in r.stdout, r.stdout + r.stderr[-300:])
+
 # ---------------------------------------------------------------- until, adoption
 table = {s.name: s for s in R.steps()}
 check('--until meter: meter and what it needs, in order',
