@@ -380,6 +380,12 @@ def main():
           (sec.get('ls'), sec.get('le')))
     check('build_report.json written', (plan_p.parent / 'build_report.json').is_file())
     rep = json.loads((plan_p.parent / 'build_report.json').read_text())
+    steps = [x['step'] for x in rep.get('timing', [])]
+    check('build_report: seconds and commands per step, adding up to the build',
+          rep.get('status') == 'built' and steps[:3] == ['probe', 'meter and tempo', 'tracks']
+          and 'stems and warp markers' in steps and 'arrangement' in steps
+          and sum(x['commands'] for x in rep['timing']) == rep['commands']
+          and all(x['seconds'] >= 0 for x in rep['timing']), rep.get('timing'))
     devs = {x['name']: [d['name'] for d in x['devices']] for x in m.tracks}
     loaded = {p: next((n for t2, ns in devs.items() if t2.startswith(p.upper()) for n in ns), '')
               for p in ('drums', 'bass', 'keys')}
@@ -535,6 +541,10 @@ def main():
     m = MockLive(swallow={'add_warp_marker'})
     r = run('remix_build.py', plan_p, port=m.port)
     check('swallowed warp-marker error -> exit 1', r.returncode == 1 and 'add_warp_marker' in r.stdout)
+    fr = json.loads((plan_p.parent / 'build_report.json').read_text())
+    check('a failed build reports the step and command count it stopped at',
+          fr.get('status') == 'failed' and fr.get('failed_step') == 'stems and warp markers'
+          and fr.get('failed_after', 0) > 0 and 'add_warp_marker' in fr.get('error', ''), fr)
     count = {'n': 0}
     def second_chunk(msg, _):
         if msg['type'] == 'add_notes_to_clip':

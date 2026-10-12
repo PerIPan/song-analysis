@@ -54,11 +54,15 @@ Most tools take `(track_index, clip_index)` — both **0-based** (Live's UI is 1
 any device parameter on regular tracks, transport, mixing/sends, clip automation,
 humanize, generative helpers.
 
+**Not reachable with the stock script — patch 2 reaches them** (raw TCP,
+`references/remote-script-patch.md`, Live 12.3+; `ableton-song-remix` uses both):
+- ⚠️ Effects on the **Master track** — stock: the user adds limiter/EQ by hand; patch 2:
+  `insert_device` with track `"master"` (built-in devices by name).
+- ⚠️ **Stamping clips into Arrangement** — stock: only real-time recording reaches it (and
+  session-fire→arrangement-record produced an empty arrangement); patch 2:
+  `duplicate_clip_to_arrangement` places a Session clip at a beat position.
+
 **Not reachable — plan around:**
-- ❌ Effects on the **Master track** — user adds limiter/EQ manually.
-- ❌ **Stamping clips into Arrangement** — only real-time recording reaches Arrangement
-  (and session-fire→arrangement-record produced an empty arrangement). Bounce loops via
-  **Resample** into a session audio clip, or drag manually.
 - ❌ **Firing an empty slot to record** — "click empty slot to record" is UI-only.
 - ❌ **Render/export audio** — user does File → Export.
 - ❌ **Return-track device parameters** — rejected ("Track index out of range"). Use
@@ -134,8 +138,11 @@ humanize, generative helpers.
 - **Count-in without Follow Actions:** click-only clip + 1–2-bar launch quantization;
   fire the groove during the count bar, it drops on the next downbeat.
 - **Odd meters:** set the Set's signature over raw TCP (`set_signature`, below) so the
-  grid and bar numbers match — one meter per Set. For scenes in different meters, use
-  clip length instead: 5/4 = 5-beat clips, 7/8 = 3.5-beat clips — the same length for
+  grid and bar numbers match. Live itself allows meter changes (time-signature markers in
+  the Arrangement; a scene's own tempo and meter, `Scene.signature_numerator` /
+  `signature_denominator` in the Live Object Model), but this Remote Script has no command
+  for either, and the LOM cannot create Arrangement markers. So for scenes in different
+  meters, use clip length: 5/4 = 5-beat clips, 7/8 = 3.5-beat clips — the same length for
   every clip in the scene **including the click**.
 - **Whole song in one scene (through-composed):** full-song-length clips per track with
   an energy arc; **leave a track empty for a live player** (e.g. no bass clip for a
@@ -204,9 +211,9 @@ above. Standard library only; tested against a mock socket
 (`tests/test_push_notes.py`).
 
 **Time signature** (no MCP tool): `live("set_signature", numerator=11, denominator=8)`,
-then read it back with `live("get_signature")` (verified on Live 12.4). It sets one global
-meter for the Set —
-the Live Object Model has no API for meter changes along the Arrangement.
+then read it back with `live("get_signature")` (verified on Live 12.4). It sets the
+song's meter; a meter change along the Arrangement is a time-signature marker, which the
+Live Object Model cannot create (draw it by hand, or set a scene's own meter).
 
 **Audio files and warping — patched Remote Script only** (raw TCP, no MCP tool;
 `references/remote-script-patch.md`, then restart Live): `create_audio_clip {track_index,

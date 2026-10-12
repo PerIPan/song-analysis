@@ -33,7 +33,7 @@ to what's needed.
 | Analysis output | Use in Ableton |
 |---|---|
 | `pulse_bpm`, `pulse_unit`, `beats_per_bar`, `num_bars` | `set_tempo(pulse_bpm × 4 / pulse_unit)` — Live's tempo counts quarter notes. One bar = `beats_per_bar × 4 / pulse_unit` Live beats (4/4 → 4, 7/8 → 3.5, 11/8 → 5.5); size clips in whole bars |
-| `chords_lv` (checked by `chord_proposal`) per `(bar, cell)` | chord clips on a synth/keys track; the band chart is `song-analysis` Phase 8 (`chart_html.py`) |
+| the chart's chords per `(bar, cell)` — the data file `gen_v<N>.py` (`SONG['chords']`), never raw `chords_lv.json` (it lacks the player's fixes) | chord clips on a synth/keys track; the band chart is `song-analysis` Phase 8 (`chart_html.py`) |
 | `bar_bpm`, `tempo_drift_pct` | above ~±3% drift, place notes through the beat grid, not one BPM (`ableton-mcp` → "Timing") |
 | bass MIDI (root line) | reference clip — or **leave the bass slot empty** for a live bassist |
 | drum-pattern read | match the original's kick/snare logic (or `generate_drum_pattern`); never impose a rock backbeat on a non-rock song |
@@ -55,11 +55,13 @@ part) is its `--mode sketch`. With stems on the grid, Live's tempo is the plan's
 2. Run the `song-analysis` pipeline: pulse + key (`foundation.py pulse`) → stems
    (`htdemucs_ft`) → **meter sweep, then `foundation.py meter` (never assume 4/4 — answer
    its questions with the user)** → bass via pyin → lyrics (`whisper_gated.py`) → chords
-   (`lv_chords.py`, cross-checked by `chord_proposal.py`).
+   (`lv_chords.py`, cross-checked by `chord_proposal.py`) → the chart (Phase 8, with the
+   player's check): its data file is the chord source for Live.
 3. Open Ableton; verify the MCP connection (`health_check` — see `ableton-mcp`).
 4. Build, e.g.: "At <BPM> in <key>, build a Session scene with these chords per bar
-   <chord_proposal>, a drum pattern matching <kick/snare logic>, and leave the bass slot
-   empty for me to play."
+   <the chart's chords>, a drum pattern matching <kick/snare logic>, and leave the bass
+   slot empty for me to play." (A sketch or remix of the whole song is scripted:
+   `ableton-song-remix`.)
 
 ## Troubleshooting (route, don't debug here)
 

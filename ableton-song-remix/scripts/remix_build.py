@@ -25,6 +25,10 @@ ableton-mcp/references/remote-script-patch.md): without it, exit 3 before any wr
 A Set that already holds clips is refused (exit 2) unless --force (then tracks and scenes
 are appended). Never run it while Claude is also calling mcp__ableton__* tools.
 
+build_report.json (beside the plan) records each step's seconds and commands ('timing') -
+a build ran ~1 s a command on Live 12.4, so the slow steps show - and, after a failure, the
+step and the command count it stopped at (status 'failed').
+
 Usage (python3, standard library only):
     remix_build.py PLAN [--parts PARTS] [--dry-run] [--force] [--no-instruments] [--no-fx]
         [--no-arrangement] [--master]
@@ -176,6 +180,16 @@ class Builder:
         self.warnings: list[str] = []
         self.report: dict = {'tracks': {}, 'scenes': {}, 'instruments': {}, 'stems': {}}
         self.marks: dict = {}
+        self.timing: list[dict] = []              # per step: seconds, commands sent
+        self.at = ''                              # the step running now
+
+    def step(self, name: str, fn, *args):
+        """Run one build step, timing it and counting its commands."""
+        self.at, t0, n0 = name, time.monotonic(), len(self.sent)
+        out = fn(*args)
+        self.timing.append({'step': name, 'seconds': round(time.monotonic() - t0, 1),
+                            'commands': len(self.sent) - n0})
+        return out
 
     # -- transport
     def raw(self, cmd: str, **p):
@@ -520,21 +534,21 @@ class Builder:
 
     def run(self, force: bool) -> None:
         self.force = force
-        base = self.probe()
-        self.setup()
-        idx = self.tracks()
+        base = self.step('probe', self.probe)
+        self.step('meter and tempo', self.setup)
+        idx = self.step('tracks', self.tracks)
         if self.instruments:
             for p in self.plan['parts']:
-                self.instrument(p, idx[p])
-        self.scenes(base)
-        self.midi(idx, base)
-        self.audio(idx, base)
+                self.step(f'instrument {p}', self.instrument, p, idx[p])
+        self.step('scenes', self.scenes, base)
+        self.step('midi clips', self.midi, idx, base)
+        self.step('stems and warp markers', self.audio, idx, base)
         if self.fx:
-            self.track_fx(idx)
+            self.step('track effects', self.track_fx, idx)
         if self.master_bus_on:
-            self.master_bus(idx)
+            self.step('master', self.master_bus, idx)
         if self.arrangement_on:
-            self.arrangement(base)
+            self.step('arrangement', self.arrangement, base)
         self.report['scenes'] = {'full': base, 'sections': base + 1}
 
 
@@ -566,26 +580,35 @@ def main() -> None:
         sys.exit(f'remix_build: stem files missing: {missing}')
     b = Builder(plan, parts, a.dry_run, not a.no_instruments, not a.no_fx, a.master_bus,
                 not a.no_arrangement)
+    report_p = plan_p.parent / 'build_report.json'
+
+    def failed(code: int, msg: str):
+        print(msg)
+        if not a.dry_run and b.sent:                  # where it stopped, for the next try
+            report_p.write_text(json.dumps(dict(
+                status='failed', failed_step=b.at, failed_after=len(b.sent), error=msg,
+                timing=b.timing, warnings=b.warnings), indent=1))
+        sys.exit(code)
     try:
         b.run(a.force)
     except Stop as e:
-        print(f'STOP: {e}')
-        sys.exit(e.code)
+        failed(e.code, f'STOP: {e}')
     except Failed as e:
-        print(f'FAILED after {len(b.sent)} commands: {e}')
-        sys.exit(1)
+        failed(1, f'FAILED after {len(b.sent)} commands: {e}')
     except OSError as e:                              # the connection dropped mid-build
-        print(f'FAILED after {len(b.sent)} commands: Live stopped answering ({e})')
-        sys.exit(4)
+        failed(4, f'FAILED after {len(b.sent)} commands: Live stopped answering ({e})')
     for w in b.warnings:
         print(f'WARNING: {w}')
     if a.dry_run:
         print(f'dry run: {len(b.sent)} commands, nothing sent')
         return
-    b.report.update(commands=len(b.sent), warnings=b.warnings,
-                    tempo=plan['tempo']['live'], signature=plan['grid']['time_signature'])
-    (plan_p.parent / 'build_report.json').write_text(json.dumps(b.report, indent=1))
-    print(f"built: {len(b.sent)} commands; tracks {b.report['tracks']}; instruments "
+    b.report.update(status='built', commands=len(b.sent), warnings=b.warnings,
+                    tempo=plan['tempo']['live'], signature=plan['grid']['time_signature'],
+                    timing=b.timing, seconds=round(sum(x['seconds'] for x in b.timing), 1))
+    report_p.write_text(json.dumps(b.report, indent=1))
+    slow = max(b.timing, key=lambda x: x['seconds'])
+    print(f"built: {len(b.sent)} commands in {b.report['seconds']} s (slowest: {slow['step']}, "
+          f"{slow['seconds']} s); tracks {b.report['tracks']}; instruments "
           f"{b.report['instruments']}; FULL scene {b.report['scenes']['full'] + 1} in Live's "
           'UI. Fire FULL, then check bar 1, a mid-song chorus and the last chorus.')
 

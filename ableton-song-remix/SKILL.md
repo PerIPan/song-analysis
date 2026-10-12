@@ -63,7 +63,7 @@ Say the plan back in one line before building.
 | 2 Plan | `remix_plan.py <song> --mode remix --preset house --tempo keep --keep vocals` | `<song>/remix/<slug>/plan.json` |
 | 3 Parts | `remix_parts.py <plan> [--set drums.kick=four]` | `parts.json`, a drum grid per pattern |
 | 4 Review | `remix_build.py <plan> --dry-run` | the command list; nothing sent |
-| 5 Build | `remix_build.py <plan>` | the Session; `build_report.json` |
+| 5 Build | `remix_build.py <plan>` | the Session; `build_report.json` (seconds and commands per step) |
 
 Every track gets a starting effects chain by role (vocal/bass/keys: EQ Eight → Compressor;
 drums: Drum Buss → EQ Eight; the muted A/B mix stays clean) at Live's defaults — set by ear.
@@ -102,13 +102,22 @@ build refuses parts made for another plan.
    failures as success. The build stops on the first failure (exit 1).
 5. **Never drive `mcp__ableton__*` tools during a build** — two clients on one Live collide.
 6. **Never overwrite the user's work.** New tracks are appended and named `· orig` / `· new`.
+7. **No unattended build** (a scheduled job, the user asleep) unless the dry run passed and
+   the user confirmed, in this session, Auto-Warp off and a new empty Set. A build that
+   fails at night can't clean up after itself; the user then restarts Live and opens a new
+   Set. A failed build writes `build_report.json` with the step and command it stopped at.
+8. **A sketch is done when the user has listened.** Fire FULL, ask for their verdict (bar 1,
+   a mid-song chorus, the last chorus, the drums with a drummer's eye) before calling it
+   finished; "robotic" means run Phase 4b (the drummer's hits, the guitar's strums).
 
 ## Limits
 
 - **No save or export.** The user saves (Collect All and Save) and exports. Clip
   envelopes may not survive the copy to the Arrangement (none are written by the build).
-- **One meter per Set.** The grouping lives in the patterns; irregular single bars aren't
-  in the analysis grid, so the remix doesn't have them either.
+- **One meter per build.** Live allows meter changes (Arrangement markers, a scene's own
+  meter), but the analysis grid has one meter and the LOM can't create Arrangement
+  markers, so the build sets one; the grouping lives in the patterns. Irregular single
+  bars aren't in the analysis grid, so the remix doesn't have them either.
 - **Section scenes start on the section's first bar**, so a vocal pickup sung in the bar
   before is cut there; the FULL scene keeps it.
 - **The kept vocal is only as clean as the separation.** Listen to `vocals.wav` alone.
