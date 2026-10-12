@@ -182,28 +182,20 @@ Run it yourself with `song-analysis/bench/run_bench.py` against your own verifie
 
 ## Tests
 
-Offline, on synthetic audio, a stand-in yt-dlp or a mock Live socket — 618 checks:
+Offline, on synthetic audio, a stand-in yt-dlp or a mock Live socket — about 660 checks,
+each test file run with the interpreter it needs:
 
 ```bash
-<analysis-venv>/bin/python song-analysis/tests/test_detect_meter.py
-<analysis-venv>/bin/python song-analysis/tests/test_chord_proposal.py
-<analysis-venv>/bin/python song-analysis/tests/test_mode_test.py
-<analysis-venv>/bin/python song-analysis/tests/test_downbeat_check.py
-<analysis-venv>/bin/python song-analysis/tests/test_stem_activity.py
-<analysis-venv>/bin/python song-analysis/tests/test_performance.py
-python3 song-analysis/tests/test_foundation.py
-python3 song-analysis/tests/test_align_lyrics.py
-python3 song-analysis/tests/test_chart_html.py
-python3 song-analysis/tests/test_lyrics_tab.py
-python3 song-analysis/tests/test_chart_questions.py
-python3 song-analysis/tests/test_fetch_audio.py
-<whisper-venv>/bin/python song-analysis/tests/test_whisper_artefacts.py
-python3 ableton-mcp/tests/test_push_notes.py
-python3 ableton-song-remix/tests/test_chordsym.py
-python3 ableton-song-remix/tests/test_remix_plan.py
-python3 ableton-song-remix/tests/test_remix_parts.py
-python3 ableton-song-remix/tests/test_remix_build.py
+python3 run_tests.py            # all; the venv tests run when $MWS_ANALYSIS_PY /
+                                # $MWS_WHISPER_PY (or ~/.config/music-workflow-skills/env.json)
+                                # name the interpreters, else they are skipped
+python3 run_tests.py --fast     # standard library only, ~3 s
+git config core.hooksPath .githooks   # once: the fast tests before every commit
 ```
+
+`tests/test_docs.py` keeps the skills' docs honest: every flag a doc shows for a script
+exists in it, and claims that went stale stay gone. Charts keep their player's fixes:
+`chart_html.py */gen_v1.py --check` exits 1 when a recorded correction no longer holds.
 
 ## Layout
 
