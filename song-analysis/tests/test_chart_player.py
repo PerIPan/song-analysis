@@ -68,6 +68,11 @@ else:
       document.getElementById('nadd').click();
       r.notes = [...document.querySelectorAll('#nlist li')].map(li => li.textContent);
       r.noted = document.querySelectorAll('.half.noted').length;
+      document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'}));
+      cells[cells.length - 3].click();                  // the last section, then L: loop to the end
+      document.dispatchEvent(new KeyboardEvent('keydown', {key: 'l'}));
+      r.wrapped = [window.PLAYER.wrapTo(16.9), window.PLAYER.wrapTo(17.0)];   // the end: 17.0 s
+      r.loop2 = cells.filter(c => c.classList.contains('loop')).length;
       document.body.dataset.result = JSON.stringify(r);
     }, 400);</script></body>"""
     test = song / 'harness.html'
@@ -82,6 +87,8 @@ else:
           abs(res.get('seek', -1) - 2.95) < 0.06, res.get('seek'))
     check('L loops the section the cell is in (Verse: bars 1-4)',
           res.get('loop') == [f'{b}.{c}' for b in range(1, 5) for c in (1, 2)], res.get('loop'))
+    check('a loop that ends on the last cell wraps back (not out of the song)',
+          res.get('wrapped') == [None, 9.0] and res.get('loop2') == 8, (res.get('wrapped'), res.get('loop2')))
     check('a note is listed against its cell and marks it',
           res.get('notes', [''])[0].startswith('bar 3.2 (0:06.0): G, not Am') and res.get('noted') == 1,
           (res.get('notes'), res.get('noted')))

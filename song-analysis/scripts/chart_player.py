@@ -14,8 +14,9 @@ renderer makes plus each cell's time, an <audio> of the song's recording (a rela
 keep the page beside the audio, it is a local tool - not for the band's shared folder) and
 a small script. Notes stay in the browser (localStorage) until copied.
 
-Keys: space play/pause · ←/→ a bar back/on · L loop the section (again: off) · [ ] slower /
-faster · N note the cell playing now · Esc clear the loop.
+Keys: space play/pause · ←/→ a bar back/on · L loop the section of the cell clicked (or
+playing; again: off) · [ ] slower / faster · N note the cell playing now · Esc clear the loop
+and the pinned cell. A click pins the cell a note goes to until the note is added.
 
 Usage (python3, standard library only):
     chart_player.py <song>/gen_v1.py [--audio FILE] [--out PATH]
@@ -54,9 +55,13 @@ JS = r"""
   const T = cells.map(c => +c.dataset.t), D = window.PLAYER;
   const key = 'chart-notes:' + D.title;
   let notes = []; try { notes = JSON.parse(localStorage.getItem(key) || '[]'); } catch (e) {}
-  let loop = null, anchor = null, now = -1;
+  let loop = null, anchor = null, now = -1, pinned = null;   // pinned: the cell a note goes to
   const $ = id => document.getElementById(id);
-  const mmss = t => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`;
+  const mmss = t => { const d = Math.round(t * 10) / 10;           // 119.96 s is 2:00.0
+    return `${Math.floor(d / 60)}:${(d % 60).toFixed(1).padStart(4, '0')}`; };
+  const endOf = i => i + 1 < T.length ? T[i + 1] : D.end;           // a cell's end in the record
+  const showAt = () => { const i = pinned ?? now;
+    $('ncell').textContent = i >= 0 ? label(cells[i]) + (pinned != null ? ' (pinned: Esc unpins)' : '') : '-'; };
   const idx = t => { let lo = 0, hi = T.length - 1, r = -1;
     while (lo <= hi) { const m = (lo + hi) >> 1; if (T[m] <= t) { r = m; lo = m + 1; } else hi = m - 1; } return r; };
   const barStart = i => cells.findIndex(c => c.dataset.b === cells[i].dataset.b);
@@ -76,23 +81,25 @@ JS = r"""
     const j = preroll ? Math.max(0, barStart(i) - (cells.filter(c => c.dataset.b === cells[i].dataset.b).length)) : i;
     A.currentTime = Math.max(0, T[Math.max(0, j)] - (j === 0 ? 0 : 0.05));
   }
+  const wrapTo = t => loop && (t >= endOf(loop[1]) || t < T[loop[0]] - 0.05) ? T[loop[0]] : null;
+  window.PLAYER.wrapTo = wrapTo;                                     // (tests call it)
   function tick() {
-    const i = idx(A.currentTime);
-    if (loop && (i > loop[1] || i < loop[0]) && !A.paused) { A.currentTime = T[loop[0]]; }
+    const i = idx(A.currentTime), w = A.paused ? null : wrapTo(A.currentTime);
+    if (w != null) A.currentTime = w;
     if (i !== now) {
       if (now >= 0) cells[now].classList.remove('now');
       now = i;
       if (i >= 0) { cells[i].classList.add('now');
         const r = cells[i].getBoundingClientRect();
         if (r.top < 60 || r.bottom > innerHeight - 20) cells[i].scrollIntoView({block: 'center', behavior: 'smooth'}); }
-      $('ncell').textContent = i >= 0 ? label(cells[i]) : '-';
+      if (pinned == null) showAt();
     }
     $('time').textContent = mmss(A.currentTime) + ' / ' + mmss(A.duration || 0);
     requestAnimationFrame(tick);
   }
   cells.forEach((c, i) => c.addEventListener('click', e => {
     if (e.shiftKey && anchor != null) { setLoop(anchor, i); A.currentTime = T[loop[0]]; A.play(); return; }
-    anchor = i; $('ncell').textContent = label(c); $('ncell').dataset.i = i;
+    anchor = i; pinned = i; showAt();
     seekCell(i, true); A.play();
   }));
   const speed = $('speed');
@@ -103,9 +110,10 @@ JS = r"""
   $('bplay').addEventListener('click', () => A.paused ? A.play() : A.pause());
   A.addEventListener('play', () => $('bplay').textContent = 'Pause');
   A.addEventListener('pause', () => $('bplay').textContent = 'Play');
+  A.addEventListener('ended', () => { if (loop) { A.currentTime = T[loop[0]]; A.play(); } });
   function loopSection() {
     if (loop) { setLoop(null); return; }
-    const i = Math.max(0, now), row = cells[i].closest('.row'), sec = [];
+    const i = pinned ?? Math.max(0, now), row = cells[i].closest('.row'), sec = [];   // the cell clicked
     let r = row; while (r && !r.classList.contains('section-start')) r = r.previousElementSibling;
     for (let x = r; x && (x === r || !x.classList.contains('section-start')); x = x.nextElementSibling)
       x.querySelectorAll('.half[data-t]').forEach(c => sec.push(cells.indexOf(c)));
@@ -113,10 +121,10 @@ JS = r"""
   }
   $('bloop').addEventListener('click', loopSection);
   function addNote() {
-    const inp = $('ntext'), i = +($('ncell').dataset.i ?? now);
+    const inp = $('ntext'), i = pinned ?? now;
     if (!inp.value.trim() || !(i >= 0)) return;
     const c = cells[i]; notes.push({b: c.dataset.b, c: c.dataset.c, label: label(c), text: inp.value.trim()});
-    inp.value = ''; save(); paintNotes();
+    inp.value = ''; pinned = null; save(); paintNotes(); showAt();
   }
   $('nadd').addEventListener('click', addNote);
   $('ntext').addEventListener('keydown', e => { if (e.key === 'Enter') addNote(); e.stopPropagation(); });
@@ -135,8 +143,8 @@ JS = r"""
       const b = +bars[cur] + (e.key === 'ArrowRight' ? 1 : -1), j = bars.indexOf(String(b)); if (j >= 0) A.currentTime = T[j]; }
     else if (e.key === 'l' || e.key === 'L') loopSection();
     else if (e.key === '[') step(-1); else if (e.key === ']') step(1);
-    else if (e.key === 'Escape') setLoop(null);
-    else if (e.key === 'n' || e.key === 'N') { e.preventDefault(); $('ncell').dataset.i = cur; $('ncell').textContent = label(cells[cur]); $('ntext').focus(); }
+    else if (e.key === 'Escape') { setLoop(null); pinned = null; showAt(); }
+    else if (e.key === 'n' || e.key === 'N') { e.preventDefault(); pinned = cur; showAt(); $('ntext').focus(); }
   });
   paintNotes(); requestAnimationFrame(tick);
   document.body.dataset.player = 'ready';
@@ -178,6 +186,16 @@ def cell_times(S: dict) -> list[tuple[int, int, float]]:
             for c in range(1, len(grouping) + 1)]
 
 
+def times_end(S: dict) -> float:
+    """Where the chart's last cell ends in the recording (the ring-out bar's end included)."""
+    F = load_json(Path(S['folder']) / 'analysis' / 'foundation.json')
+    db = list(F['downbeat_times'])
+    if max(sec[2] for sec in S['sections']) == len(db):
+        end = S.get('duration_s') or 0
+        return end if end > db[-1] else 2 * db[-1] - db[-2]
+    return db[-1]
+
+
 def player(S: dict, audio: Path, out: Path) -> str:
     doc, info = compose(S)
     times = cell_times(S)
@@ -203,7 +221,7 @@ def player(S: dict, audio: Path, out: Path) -> str:
              '<div>at <b id="ncell">-</b></div><div class="row"><input id="ntext" '
              'placeholder="e.g. G, not Am · word on the next half"><button id="nadd">Add</button>'
              '</div><ol id="nlist"></ol><button id="ncopy">Copy all</button></div>')
-    data = json.dumps({'title': title})
+    data = json.dumps({'title': title, 'end': times_end(S)})
     doc = doc.replace('</style></head><body>', CSS + '</style></head><body>', 1)
     doc = re.sub(r'(<body>\n?)', lambda m: m.group(1) + bar, doc, count=1)
     doc = doc.replace('</body></html>', f'{notes}<script>window.PLAYER={data};{JS}</script>'

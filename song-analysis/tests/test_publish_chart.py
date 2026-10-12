@@ -101,6 +101,12 @@ r = run(song / 'gen_v1.py', '--to', TMP / 'tr', '--transpose', '-2', '--capo', '
 check("transposed: named 'key of G minor, capo 3' the band's way",
       '3.3' not in r.stdout and 'Nobody - Paper Lanterns - chords - key of G minor, capo 3 WiP.pdf'
       in r.stdout, r.stdout + r.stderr)
+sys.path.insert(0, str(SCRIPT.parent))
+from publish_chart import base_name  # noqa: E402
+check('names: a transposition with no readable key says the semitones; capo alone says capo',
+      base_name(dict(artist='A', title='T'), 'WiP', None, dict(transpose=2, capo=0)) == 'A - T - chords - +2 semitones WiP'
+      and base_name(dict(artist='A', title='T', key_short='E minor'), 'OK', None, dict(transpose=0, capo=3,
+      sounding='E minor')) == 'A - T - chords - capo 3 OK')
 r = run('--rerender', songs)
 check('--rerender: a chart never rendered is listed as changed, not written', r.returncode == 0
       and 'CHANGED one' in r.stdout and not (song / 'Nobody - Paper Lanterns - Chords.html').exists(),

@@ -35,7 +35,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from chart_html import compose, load_song, report_corrections  # noqa: E402
+from chart_html import compose, key_suffix, load_song, report_corrections  # noqa: E402
 
 ENV_FILE = Path.home() / '.config' / 'music-workflow-skills' / 'env.json'
 CHROME = ('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
@@ -52,14 +52,11 @@ def chrome() -> str | None:
          if shutil.which(n)), None)
 
 
-def base_name(S: dict, status: str, prefix: str | None, moved: str = '') -> str:
+def base_name(S: dict, status: str, prefix: str | None, keys: dict | None = None) -> str:
     """'3.3 Artist - Title - chords - E minor WiP', transposed '... - chords - key of D
-    minor, capo 3 WiP' (no / \\ : in it)."""
-    key = f" - {S['key_short']}" if S.get('key_short') else ''
-    if moved:
-        new = moved.split(' (')[0].replace('in ', 'key of ', 1) if moved.startswith('in ') else ''
-        capo = re.search(r'capo \d+', moved)
-        key = ' - ' + ', '.join(x for x in (new, capo and capo.group(0)) if x)
+    minor, capo 3 WiP' or '... - chords - +2 semitones WiP' (no / \\ : in it)."""
+    moved = key_suffix(keys or {})
+    key = f' - {moved}' if moved else f" - {S['key_short']}" if S.get('key_short') else ''
     name = f"{S['artist']} - {S['title']} - chords{key} {status}"
     return re.sub(r'[\\/:]', '-', f'{prefix} {name}' if prefix else name)
 
@@ -99,8 +96,8 @@ def publish(data: str, to: str | None, status: str, prefix: str | None, yes: boo
     if dest is None:
         print(f'publish_chart: where to? pass --to, or set "publish_to" in {ENV_FILE}')
         return 2
-    base = base_name(S, status, prefix, info['moved'])
-    other = base_name(S, STATUSES[status == 'WiP'], prefix, info['moved'])
+    base = base_name(S, status, prefix, info['keys'])
+    other = base_name(S, STATUSES[status == 'WiP'], prefix, info['keys'])
     files = [dest / f'{base}.html', dest / f'{base}.pdf']
     old = [p for ext in ('.html', '.pdf') for p in [dest / f'{other}{ext}'] if p.exists()]
     if info['n_q']:

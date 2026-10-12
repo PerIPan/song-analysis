@@ -15,7 +15,7 @@ SCRIPTS = Path(__file__).resolve().parents[1] / 'scripts'
 sys.path.insert(0, str(SCRIPTS))
 from chart_form import bar_chords, fold, fold_bars  # noqa: E402
 from chart_export import ireal_bar, ireal_chord  # noqa: E402
-from chart_html import key_of, move, spelling, transposed  # noqa: E402
+from chart_html import key_of, key_in, key_text, move, transposed  # noqa: E402
 
 TMP = Path(tempfile.mkdtemp(prefix='export_'))
 atexit.register(shutil.rmtree, TMP, True)
@@ -56,18 +56,33 @@ check('iReal chord symbols', [ireal_chord(c) for c in ('Am7', 'Cmaj7', 'F#m7b5',
       'Em/D', 'N.C.', 'Gsus2', 'Am')] == ['A-7', 'C^7', 'F#h7', 'Bo7', 'E7sus', 'E-/D', 'n', 'G2', 'A-'])
 check('iReal bars: four cells, a held second half blank',
       [ireal_bar(('C', 'G')), ireal_bar(('C', 'C')), ireal_bar(('C',))] == ['C G ', 'C   ', 'C   '])
-check('keys read', [key_of(x) for x in ('E minor', 'F♯', 'Bb major', 'C#m blues', 'nothing')]
-      == [(4, True), (6, False), (10, False), (1, True), None])
-check('spelling: sharps in sharp keys, flats otherwise', spelling((2, True)) [1] == 'Db'
-      and spelling((4, True))[6] == 'F#' and spelling((5, False))[10] == 'Bb')
-check('move: root and slash bass', move('Em/D', -2, spelling((2, True))) == 'Dm/C'
-      and move('F#m7b5', 1, spelling((7, False))) == 'Gm7b5' and move('N.C.', 3, []) == 'N.C.')
-T, note = transposed(dict(key_short='E minor', chords={(1, 1): 'Em', (1, 2): 'B7'}), -2, 0)
-check('transpose -2 from E minor: D minor, spelt with flats where they belong',
-      T['chords'] == {(1, 1): 'Dm', (1, 2): 'A7'} and note == 'in D minor (orig. E minor, -2)', (T, note))
-T, note = transposed(dict(key_short='E minor', chords={(1, 1): 'Em'}), 0, 2)
-check('capo 2: shapes two semitones down, said', T['chords'] == {(1, 1): 'Dm'} and 'capo 2' in note,
-      (T, note))
+check('keys read: modes, the first of two, blues is not a flat',
+      [tuple(key_of(x)) for x in ('E minor', 'F♯', 'Bb major', 'C#m', 'C Mixolydian',
+                                  'F Lydian / A minor', 'A blues')]
+      == [(4, 'minor', 2), (6, 'major', 3), (10, 'major', 6), (1, 'minor', 0), (0, 'mixolydian', 0),
+          (5, 'lydian', 3), (9, 'major', 5)] and key_of('nothing') is None)
+check('keys spelt from the signature with fewer accidentals',
+      [key_text(key_in(pc, m)) for pc, m in ((1, 'major'), (10, 'minor'), (3, 'minor'), (8, 'minor'),
+                                            (6, 'major'), (2, 'mixolydian'))]
+      == ['Db major', 'Bb minor', 'Eb minor', 'G# minor', 'Gb major', 'D Mixolydian'])
+tr = lambda key, chords, n, capo=0: transposed(dict(key_short=key, chords=dict(enumerate(chords))), n, capo)
+T, note, keys = tr('E minor', ['Em', 'B/D#', 'D#dim7', 'D/F#'], -2)
+check('E minor -2: the raised 7th stays raised (B/D# -> A/C#, D#dim7 -> C#dim7)',
+      list(T['chords'].values()) == ['Dm', 'A/C#', 'C#dim7', 'C/E']
+      and note == 'in D minor (orig. E minor, -2)' and keys['sounding'] == 'D minor', (T, note))
+T, note, keys = tr('E minor', ['Em', 'D/F#', 'C'], 6)
+check('E minor +6: Bb minor, not A# minor', list(T['chords'].values()) == ['Bbm', 'Ab/C', 'Gb'], T)
+T, note, keys = tr('C major', ['C', 'G7'], 1)
+check('C +1: Db, not C#', list(T['chords'].values()) == ['Db', 'Ab7'] and keys['sounding'] == 'Db major', T)
+T, note, keys = tr('C Mixolydian', ['C', 'Bb'], 2)
+check('a mode keeps its name and spelling (C Mixolydian +2: D, C)',
+      list(T['chords'].values()) == ['D', 'C'] and 'D Mixolydian' in note, (T, note))
+T, note, keys = tr('E minor', ['Em', 'B7'], -2, 3)
+check('capo 3 after -2: shapes in B minor, sounding D minor, said',
+      list(T['chords'].values()) == ['Bm', 'F#7'] and keys['shape'] == 'B minor'
+      and 'capo 3: shapes in B minor' in note, (T, note, keys))
+check('move without a key: by semitone, a sensible letter', move('Em/D', -2) == 'Dm/C'
+      and move('N.C.', 3) == 'N.C.')
 
 # ---------------------------------------------------------------- the CLI on a song folder
 song = TMP / 'song'
@@ -113,6 +128,7 @@ check('11/8: no iReal export, said plainly', 'no 11/8 time signature' in r.stdou
 r = run(song / 'gen_v1.py', '--chordpro', '--transpose', '2', '--out-dir', TMP / 'tr')
 cho = next((TMP / 'tr').glob('*.cho')).read_text() if (TMP / 'tr').exists() else ''
 check('--transpose 2: B minor chords, named and said in the file', '[Bm]Salt' in cho
-      and 'in B minor (orig. A minor, +2)' in cho and '(in B minor)' in next((TMP / 'tr').glob('*.cho')).name,
+      and 'in B minor (orig. A minor, +2)' in cho and '{key: Bm}' in cho
+      and '(key of B minor)' in next((TMP / 'tr').glob('*.cho')).name,
       cho[:300])
 sys.exit(1 if fails else 0)

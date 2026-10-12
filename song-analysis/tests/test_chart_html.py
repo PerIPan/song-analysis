@@ -613,7 +613,7 @@ def main():
         "            chords={(1, 1): 'Em', (1, 2): 'B7', (2, 1): 'C/E'},\n"
         "            sections=[('Verse', 1, 2, 'verse', '')])\n", encoding="utf-8")
     r = run(str(d / "tr.py"))
-    trd = d / "Nobody - Tr - Chords (in D minor).html"
+    trd = d / "Nobody - Tr - Chords (key of D minor).html"
     doc_t = trd.read_text(encoding="utf-8") if trd.exists() else ""
     labels = [c[2] for c in CELL.findall(doc_t)][:3]
     check("transpose -2: printed in D minor, slash bass moved, the title and file say so",

@@ -186,63 +186,116 @@ def split_slash(label: str) -> tuple[str, str | None]:
     return (m.group(1), m.group(2)) if m else (label, None)
 
 
-KEY_RE = re.compile(r'\s*([A-G])\s*([#b♯♭]?)\s*(minor|min|m(?![a-z])|major|maj)?', re.I)
+LETTERS, NATURAL = 'CDEFGAB', (0, 2, 4, 5, 7, 9, 11)
+MODE_SEMI = {'major': 0, 'ionian': 0, 'dorian': 2, 'phrygian': 4, 'lydian': 5, 'mixolydian': 7,
+             'aeolian': 9, 'minor': 9, 'locrian': 11}        # the mode's tonic above its major
+MODE_STEP = {'major': 0, 'ionian': 0, 'dorian': 1, 'phrygian': 2, 'lydian': 3, 'mixolydian': 4,
+             'aeolian': 5, 'minor': 5, 'locrian': 6}         # ... in scale steps (letters)
+MINOR_THIRD = ('minor', 'aeolian', 'dorian', 'phrygian', 'locrian')
+MAJOR_KEYS = ('C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B')  # signatures
+LETTER_SHIFT = (0, 1, 1, 2, 2, 3, 3, 4, 5, 5, 6, 6)          # semitones -> letters, no key known
+KEY_RE = re.compile(r'\s*([A-G])([#b♯♭]?)(?:\s*((?i:major|minor|maj|min|ionian|dorian|phrygian|'
+                    r'lydian|mixolydian|aeolian|locrian)(?![a-z])|m(?![a-z])))?')
 
 
-def key_of(text: str | None) -> tuple[int, bool] | None:
-    """('E minor' | 'F♯' | 'Bb major' | 'C#m ...') -> (pitch class, minor); None if unreadable."""
+class Key(tuple):
+    """(pitch class, mode, tonic letter index): 'E minor' -> (4, 'minor', 2)."""
+    pc = property(lambda s: s[0])
+    mode = property(lambda s: s[1])
+    letter = property(lambda s: s[2])
+    minor = property(lambda s: s[1] in MINOR_THIRD)
+
+
+def key_of(text: str | None) -> Key | None:
+    """'E minor' | 'F♯' | 'Bb major' | 'C#m' | 'C Mixolydian' | 'F Lydian / A minor' (the first
+    key named) -> Key; None if unreadable. 'A blues' is A (major), not A flat."""
     m = KEY_RE.match(text or '')
     if not m:
         return None
     acc = m.group(2).replace('♯', '#').replace('♭', 'b')
-    minor = bool(m.group(3)) and m.group(3).lower() in ('minor', 'min', 'm')
-    return PC[m.group(1).upper() + acc], minor
+    word = (m.group(3) or 'major').lower()
+    mode = {'maj': 'major', 'min': 'minor', 'm': 'minor'}.get(word, word)
+    return Key((PC[m.group(1) + acc], mode, LETTERS.index(m.group(1))))
 
 
-def spelling(key: tuple[int, bool] | None) -> list[str]:
-    """Sharp names in sharp keys (by the major key of the signature), flats otherwise."""
-    if key is None:
-        return FLAT
-    major = (key[0] + 3) % 12 if key[1] else key[0]
-    return SHARP if major in (7, 2, 9, 4, 11, 6, 1) else FLAT
+def note_name(letter: int, pc: int) -> str | None:
+    """The note on that letter with that pitch class (up to a double accidental), else None."""
+    acc = (pc - NATURAL[letter] + 6) % 12 - 6
+    return LETTERS[letter] + ('#' * acc if acc > 0 else 'b' * -acc) if abs(acc) <= 2 else None
 
 
-def move(label: str, n: int, names: list[str]) -> str:
-    """A lead-sheet chord n semitones up, root and slash bass spelt from names."""
-    if n == 0 or not label or label.startswith('N'):
+def key_in(pc: int, mode: str) -> Key:
+    """The key of that mode on that pitch class, spelt from the signature with the fewer
+    accidentals (Db not C#, Bb minor not A# minor, Eb minor, G# minor, Gb major)."""
+    major = MAJOR_KEYS[(pc - MODE_SEMI.get(mode, 0)) % 12]
+    return Key((pc, mode, (LETTERS.index(major[0]) + MODE_STEP.get(mode, 0)) % 7))
+
+
+def key_text(k: Key) -> str:
+    return f"{note_name(k.letter, k.pc)} {k.mode if k.mode in ('major', 'minor') else k.mode.capitalize()}"
+
+
+def move_note(name: str, n: int, letters: int) -> str:
+    """A note n semitones up and `letters` letter names on: its function in the key is kept
+    (D# in E minor -> C# in D minor, the raised 7th stays raised)."""
+    m = re.fullmatch(r'([A-G])([#b]*)', name)
+    if not m:
+        return name
+    pc = (PC[m.group(1)] + m.group(2).count('#') - m.group(2).count('b')) % 12
+    letter = (LETTERS.index(m.group(1)) + letters) % 7
+    return note_name(letter, (pc + n) % 12) or FLAT[(pc + n) % 12]
+
+
+def move(label: str, n: int, letters: int | None = None) -> str:
+    """A lead-sheet chord n semitones up: root and slash bass moved by letter and semitone."""
+    if not label or label.startswith('N'):
+        return label
+    letters = LETTER_SHIFT[n % 12] if letters is None else letters
+    if n % 12 == 0 and letters % 7 == 0:
         return label
     chord, bass = split_slash(label)
     m = re.match(r'([A-G][#b]?)(.*)', chord)
     if not m:
         return label
-    out = names[(PC[m.group(1)] + n) % 12] + m.group(2)
-    return f"{out}/{names[(PC[bass] + n) % 12]}" if bass else out
+    out = move_note(m.group(1), n, letters) + m.group(2)
+    return f'{out}/{move_note(bass, n, letters)}' if bass else out
 
 
-def key_name(key: tuple[int, bool], names: list[str]) -> str:
-    return names[key[0]] + (' minor' if key[1] else ' major')
-
-
-def transposed(S: dict, transpose: int, capo: int) -> tuple[dict, str]:
-    """SONG with chords (and bass notes) moved by transpose - capo, spelt from the key it
-    lands in; a note saying so ('in D minor (orig. E minor, -2), capo 3: shapes -3')."""
-    shift = transpose - capo
+def transposed(S: dict, transpose: int, capo: int) -> tuple[dict, str, dict]:
+    """SONG with chords (and bass notes) moved to the band's key (transpose) and then to
+    shapes for a capo; a note saying so; and the keys: {'sounding', 'shape'} as text (None
+    when key_short is unreadable), 'transpose', 'capo'."""
     k0 = key_of(S.get('key_short'))
-    sounding = ((k0[0] + transpose) % 12, k0[1]) if k0 else None
-    names = spelling(((sounding[0] - capo) % 12, sounding[1]) if sounding else None)
-    S = dict(S, chords={k: move(v, shift, names) for k, v in S['chords'].items()},
-             bass_notes={k: move(v, shift, names) for k, v in S.get('bass_notes', {}).items()})
+    shift = transpose - capo
+    sounding = key_in((k0.pc + transpose) % 12, k0.mode) if k0 else None
+    shape = key_in((sounding.pc - capo) % 12, k0.mode) if k0 else None
+    letters = (shape.letter - k0.letter) % 7 if k0 else None
+    keys = dict(sounding=sounding and key_text(sounding), shape=shape and key_text(shape),
+                transpose=transpose, capo=capo, key=sounding)
     if not (transpose or capo):
-        return S, ''
-    snames = spelling(sounding)
+        return S, '', keys
+    D = dict(S, chords={k: move(v, shift, letters) for k, v in S['chords'].items()},
+             bass_notes={k: move(v, shift, letters) for k, v in S.get('bass_notes', {}).items()})
     parts = []
     if transpose:
-        parts.append(f"in {key_name(sounding, snames)}" if sounding else f'{transpose:+d} semitones')
-        if k0:
-            parts[-1] += f" (orig. {key_name(k0, spelling(k0))}, {transpose:+d})"
+        parts.append(f"in {keys['sounding']} (orig. {key_text(k0)}, {transpose:+d})" if k0
+                     else f'{transpose:+d} semitones')
     if capo:
-        parts.append(f'capo {capo}: shapes {-capo:+d}')
-    return S, ', '.join(parts)
+        parts.append(f"capo {capo}: shapes in {keys['shape']}" if k0 else f'capo {capo}: shapes '
+                     f'{-capo:+d}')
+    return D, ', '.join(parts), keys
+
+
+def key_suffix(keys: dict) -> str:
+    """How a transposed file is named: 'key of D minor', 'key of D minor, capo 3', '+2
+    semitones', 'capo 3'; '' when nothing moved."""
+    parts = []
+    if keys.get('transpose'):
+        parts.append(f"key of {keys['sounding']}" if keys.get('sounding')
+                     else f"{keys['transpose']:+d} semitones")
+    if keys.get('capo'):
+        parts.append(f"capo {keys['capo']}")
+    return ', '.join(parts)
 
 
 def pretty(s: str) -> str:
@@ -377,7 +430,8 @@ def splits(S: dict, lv: dict) -> set:
             if root_pc(ch) is not None and lv.get(k, {}).get('coverage', 1) < 0.5}
 
 
-def distribute(S: dict, grid: Grid, words: list | None) -> tuple[dict, dict]:
+def distribute(S: dict, grid: Grid, words: list | None,
+               owners: dict | None = None) -> tuple[dict, dict]:
     """Split each sung line over the cells where its words are sung -> ({cell: text},
     {cell: (text, kind)} of the pickups and ad-libs, which stay whole in their cell beside
     any line words there). Word times come from a local alignment against Whisper's words
@@ -396,7 +450,10 @@ def distribute(S: dict, grid: Grid, words: list | None) -> tuple[dict, dict]:
     heard word starting within a dotted eighth (ANTICIPATE beats) of the next cell and held
     across it (the line's next word comes after, or none does) is in the next cell - the
     push a player hears, not the consonant Whisper times; a quick pickup into a word that
-    is itself pushed ("so I | stepped") stays. With no words, every line stays whole."""
+    is itself pushed ("so I | stepped") stays. With no words, every line stays whole.
+    owners, when given, gets {cell: [(the line's anchor, word), ...]} - which line each
+    cell's words came from (the exports rebuild lines from it)."""
+    own = owners if owners is not None else {}
     entries = sorted(S.get('lyrics', {}).items())
     out, over = {}, {}
     stem = lambda w: norm(w)[:4]
@@ -462,6 +519,7 @@ def distribute(S: dict, grid: Grid, words: list | None) -> tuple[dict, dict]:
             continue
         if kind == 'fixed':                      # the player put it here: no timing, but
             out.setdefault(key, []).append(text)  # it claims its heard words, so the next
+            own.setdefault(key, []).append((key, text))
             floor = key                           # line doesn't take them
             if words:
                 fm = match(key, used)
@@ -469,6 +527,7 @@ def distribute(S: dict, grid: Grid, words: list | None) -> tuple[dict, dict]:
             continue
         if not words:
             out[key] = [text]
+            own[key] = [(key, text)]
             continue
         nxt, t_a, t_end = span(key)
         m, nk = match(key, used), next((k for k in sung if k > key), None)
@@ -519,6 +578,7 @@ def distribute(S: dict, grid: Grid, words: list | None) -> tuple[dict, dict]:
                 c = grid.prev(c)
             c = max(c, last)                             # words stay in sung order
             out.setdefault(c, []).append(tok)
+            own.setdefault(c, []).append((key, tok))
             last = c
         floor = last
     return {c: ' '.join(toks) for c, toks in out.items()}, over
@@ -982,7 +1042,7 @@ def compose(S: dict, allow_stale: bool = False) -> tuple[str, dict]:
     #                                     to read; the chart keeps the loop
     flagged, split = flags(S, lv, tri, bass) - quiet, splits(S, lv) - quiet
     lyr, over = distribute(S, grid, words)
-    D, moved = transposed(S, S.get('transpose', 0), S.get('capo', 0))   # printed chords only
+    D, moved, keys = transposed(S, S.get('transpose', 0), S.get('capo', 0))   # printed only
     st = stats(S, lv, tri)
     per_row = S.get('bars_per_row') or max(1, 8 // grid.n)
     grid_rules, shade = grid_css(grouping, per_row)
@@ -999,8 +1059,8 @@ def compose(S: dict, allow_stale: bool = False) -> tuple[str, dict]:
            .replace('@EXTRA@\n', ''.join(r + '\n' for r in extra)))
 
     key = f" · {esc(S['key_short'])}" if S.get('key_short') and not moved else ''
-    if moved:
-        key = f" · {esc(moved[3:].split(' (')[0].split(', capo')[0])}" if moved.startswith('in ') else ''
+    if moved and S.get('transpose') and keys['sounding']:
+        key = f" · {esc(keys['sounding'])}"
     name = f"{esc(S['artist'])} — {esc(S['title'])}"
     hdr = ''.join(f'<div><div class="k">{esc(k)}</div><div class="v">{v}</div></div>'
                   for k, v in S.get('facts', []))
@@ -1065,10 +1125,11 @@ def compose(S: dict, allow_stale: bool = False) -> tuple[str, dict]:
 </section>
 </body></html>
 """
-    tag = f" ({moved.split(' (')[0]})" if moved else ''
+    tag = f' ({key_suffix(keys)})' if moved else ''
     default = re.sub(r'[\\/:]', '-', f"{S['artist']} - {S['title']} - Chords{tag}.html")
     n_ly = len(set(lyr) | {k for k, (_, kind) in over.items() if kind == 'adlib'})
     return doc, dict(stats=st, n_q=len(flagged), n_split=len(split), n_lyric=n_ly, moved=moved,
+                     keys=keys,
                      default_out=folder / S.get('out', default),
                      n_corrections=len(S.get('corrections', ())),
                      failed=correction_failures(S, lyr))
